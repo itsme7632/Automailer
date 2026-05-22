@@ -1,8 +1,28 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import authRouter from "./auth";
+import gmailRouter from "./gmail";
+import dashboardRouter from "./dashboard";
+import campaignsRouter from "./campaigns";
+import leadsRouter from "./leads";
+import templatesRouter from "./templates";
+import aiRouter from "./ai";
+import draftsRouter from "./drafts";
+import uploadsRouter from "./uploads";
+import adminRouter from "./admin";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(authRouter);
+router.use(gmailRouter);
+router.use(dashboardRouter);
+router.use(campaignsRouter);
+router.use(leadsRouter);
+router.use(templatesRouter);
+router.use(aiRouter);
+router.use(draftsRouter);
+router.use(uploadsRouter);
+router.use(adminRouter);
 
 export default router;

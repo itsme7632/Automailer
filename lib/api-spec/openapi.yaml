@@ -1354,10 +1354,9 @@ components:
     FileUploadInput:
       type: object
       properties:
-        file:
+        filename:
           type: string
-          format: binary
-      required: [file]
+      required: [filename]
 
     ParsedLeadRow:
       type: object
