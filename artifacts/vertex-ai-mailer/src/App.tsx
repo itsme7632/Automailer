@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
+import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
 import Campaigns from "@/pages/Campaigns";
 import CampaignDetail from "@/pages/CampaignDetail";
@@ -36,6 +37,7 @@ function Router() {
       <Route path="/" component={Home} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
+      <Route path="/auth/callback" component={AuthCallback} />
       
       <Route path="/dashboard">
         <ProtectedRoute>
