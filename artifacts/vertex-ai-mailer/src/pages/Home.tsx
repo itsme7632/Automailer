@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
-import { Zap, ArrowRight, Upload, Sparkles, Send, ShieldCheck } from "lucide-react";
+import { Zap, ArrowRight, Upload, Sparkles, Send, CheckCircle } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function Home() {
@@ -10,24 +10,25 @@ export default function Home() {
   const [, setLocation] = useLocation();
 
   useEffect(() => {
-    if (user) {
-      setLocation("/dashboard");
-    }
+    if (user) setLocation("/dashboard");
   }, [user, setLocation]);
 
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-hidden selection:bg-primary/30">
-      <header className="fixed top-0 w-full z-50 bg-background/80 backdrop-blur-md border-b border-border/40">
-        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2 font-bold text-xl text-primary tracking-tight">
-            <Zap className="h-6 w-6" />
-            <span>Vertex Mailer</span>
+    <div className="min-h-screen bg-white text-slate-900 overflow-hidden selection:bg-blue-100">
+      {/* Nav */}
+      <header className="fixed top-0 w-full z-50 bg-white/90 backdrop-blur-md border-b border-slate-100">
+        <div className="container mx-auto px-6 h-16 flex items-center justify-between max-w-6xl">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
+              <Zap className="h-4 w-4 text-white" />
+            </div>
+            <span className="font-bold text-slate-900 tracking-tight">Vertex Mailer</span>
           </div>
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" asChild className="hidden sm:inline-flex">
+          <div className="flex items-center gap-3">
+            <Button variant="ghost" asChild className="hidden sm:inline-flex text-slate-600 hover:text-slate-900">
               <Link href="/login">Sign In</Link>
             </Button>
-            <Button asChild>
+            <Button asChild className="rounded-xl shadow-sm">
               <Link href="/register">Get Started</Link>
             </Button>
           </div>
@@ -35,80 +36,99 @@ export default function Home() {
       </header>
 
       <main>
-        {/* Hero Section */}
-        <section className="pt-32 pb-20 md:pt-48 md:pb-32 px-6 relative">
-          {/* Background glows */}
-          <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/20 rounded-full blur-[120px] -z-10 pointer-events-none" />
-          
-          <div className="container mx-auto max-w-5xl text-center">
+        {/* Hero */}
+        <section className="pt-36 pb-24 px-6 relative overflow-hidden">
+          {/* Soft gradient blobs */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[500px] bg-gradient-to-b from-blue-50 to-transparent rounded-full blur-3xl -z-10 pointer-events-none opacity-70" />
+          <div className="absolute top-20 right-0 w-[400px] h-[400px] bg-violet-50 rounded-full blur-3xl -z-10 pointer-events-none opacity-60" />
+
+          <div className="container mx-auto max-w-4xl text-center">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5 }}
             >
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-primary text-sm font-medium mb-8">
-                <Sparkles className="h-4 w-4" />
-                <span>AI-Powered Vehicle Shipping Outreach</span>
+              <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-xs font-medium mb-8">
+                <Sparkles className="h-3.5 w-3.5" />
+                AI-Powered Vehicle Shipping Outreach
               </div>
-              
-              <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight mb-8 leading-[1.1]">
-                Turn lead sheets into <br className="hidden md:block" />
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-blue-400">
-                  ready-to-send drafts.
+
+              <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight mb-6 leading-[1.1] text-slate-900">
+                Turn lead sheets into
+                <br className="hidden md:block" />
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-violet-500">
+                  {" "}ready-to-send drafts.
                 </span>
               </h1>
-              
-              <p className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed">
-                The purpose-built outreach cockpit for auto transport brokers. Upload your CSVs, generate hyper-personalized emails with Vertex AI, and sync them directly to Gmail.
+
+              <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed">
+                The outreach cockpit for auto transport brokers. Upload your CSV leads,
+                generate hyper-personalized emails with AI, and sync them directly to Gmail.
               </p>
-              
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <Button size="lg" className="h-14 px-8 text-base font-medium w-full sm:w-auto group" asChild>
+
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+                <Button size="lg" className="h-12 px-8 rounded-xl shadow-md font-medium group" asChild>
                   <Link href="/register">
-                    Start Generating
-                    <ArrowRight className="ml-2 h-5 w-5 group-hover:translate-x-1 transition-transform" />
+                    Start for free
+                    <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
                   </Link>
                 </Button>
-                <Button size="lg" variant="outline" className="h-14 px-8 text-base font-medium w-full sm:w-auto" asChild>
-                  <Link href="/login">Sign In</Link>
+                <Button size="lg" variant="outline" className="h-12 px-8 rounded-xl border-slate-200 font-medium text-slate-700" asChild>
+                  <Link href="/login">Sign in</Link>
                 </Button>
               </div>
             </motion.div>
 
-            {/* Dashboard Preview Mockup */}
+            {/* App mockup */}
             <motion.div
               initial={{ opacity: 0, y: 40 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.7, delay: 0.2 }}
               className="mt-20 relative mx-auto max-w-4xl"
             >
-              <div className="rounded-xl border border-border/50 bg-card shadow-2xl overflow-hidden backdrop-blur-sm">
-                <div className="h-12 border-b border-border/50 flex items-center px-4 gap-2 bg-muted/30">
+              <div className="rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-slate-200/80 overflow-hidden">
+                {/* Browser chrome */}
+                <div className="h-11 bg-slate-50 border-b border-slate-100 flex items-center px-4 gap-2">
                   <div className="flex gap-1.5">
-                    <div className="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50" />
-                    <div className="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50" />
-                    <div className="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50" />
+                    <div className="w-3 h-3 rounded-full bg-slate-200" />
+                    <div className="w-3 h-3 rounded-full bg-slate-200" />
+                    <div className="w-3 h-3 rounded-full bg-slate-200" />
+                  </div>
+                  <div className="flex-1 flex justify-center">
+                    <div className="h-5 w-48 bg-slate-100 rounded-md" />
                   </div>
                 </div>
-                <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
-                  <div className="col-span-1 space-y-4">
-                    <div className="h-20 rounded border border-border/50 bg-background/50 flex flex-col justify-center px-4">
-                      <div className="h-2 w-1/3 bg-muted rounded mb-3" />
-                      <div className="h-4 w-2/3 bg-primary/40 rounded" />
-                    </div>
-                    <div className="h-20 rounded border border-border/50 bg-background/50 flex flex-col justify-center px-4">
-                      <div className="h-2 w-1/3 bg-muted rounded mb-3" />
-                      <div className="h-4 w-1/2 bg-blue-500/40 rounded" />
-                    </div>
-                    <div className="h-32 rounded border border-border/50 bg-background/50" />
+                {/* Mock dashboard */}
+                <div className="flex">
+                  <div className="w-44 bg-white border-r border-slate-100 p-3 space-y-1 hidden sm:block">
+                    {["Dashboard", "Campaigns", "Leads", "Templates", "Drafts"].map((item, i) => (
+                      <div key={item} className={`h-8 rounded-lg flex items-center px-3 gap-2 ${i === 0 ? "bg-blue-50" : ""}`}>
+                        <div className={`h-2 w-2 rounded-full ${i === 0 ? "bg-blue-500" : "bg-slate-200"}`} />
+                        <div className={`h-2 rounded-full ${i === 0 ? "bg-blue-300 w-16" : "bg-slate-100 w-14"}`} />
+                      </div>
+                    ))}
                   </div>
-                  <div className="col-span-2 space-y-4">
-                    <div className="h-12 rounded border border-border/50 bg-background/50" />
-                    <div className="h-48 rounded border border-border/50 bg-background/50 flex flex-col p-4 gap-3">
-                      <div className="h-3 w-full bg-muted rounded" />
-                      <div className="h-3 w-full bg-muted rounded" />
-                      <div className="h-3 w-3/4 bg-muted rounded" />
-                      <div className="h-3 w-5/6 bg-muted rounded" />
+                  <div className="flex-1 p-5 bg-slate-50/50">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+                      {["bg-blue-500", "bg-violet-400", "bg-emerald-400", "bg-amber-400"].map((c, i) => (
+                        <div key={i} className="bg-white rounded-xl p-3 border border-slate-100 shadow-sm">
+                          <div className={`h-6 w-6 rounded-lg ${c} opacity-20 mb-2`} />
+                          <div className="h-2 w-12 bg-slate-100 rounded-full mb-1.5" />
+                          <div className="h-5 w-8 bg-slate-200 rounded-md" />
+                        </div>
+                      ))}
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-4 space-y-3">
+                      {[80, 60, 90, 45].map((w, i) => (
+                        <div key={i} className="flex items-center gap-3">
+                          <div className="h-7 w-7 rounded-lg bg-slate-100 flex-shrink-0" />
+                          <div className="flex-1 space-y-1.5">
+                            <div className="h-2 rounded-full bg-slate-100" style={{ width: `${w}%` }} />
+                            <div className="h-1.5 rounded-full bg-slate-50" style={{ width: `${w - 20}%` }} />
+                          </div>
+                          <div className="h-5 w-14 rounded-full bg-blue-50 flex-shrink-0" />
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </div>
@@ -118,50 +138,90 @@ export default function Home() {
         </section>
 
         {/* How it works */}
-        <section className="py-24 bg-muted/20 border-y border-border/40">
-          <div className="container mx-auto px-6">
-            <div className="text-center max-w-3xl mx-auto mb-16">
-              <h2 className="text-3xl md:text-4xl font-bold mb-4">The Outreach Machine</h2>
-              <p className="text-muted-foreground text-lg">Stop copying and pasting templates. Build a scalable pipeline that sounds like you wrote every email by hand.</p>
+        <section className="py-24 px-6 bg-slate-50 border-y border-slate-100">
+          <div className="container mx-auto max-w-5xl">
+            <div className="text-center mb-16">
+              <h2 className="text-3xl font-bold text-slate-900 mb-3">How it works</h2>
+              <p className="text-slate-500 max-w-xl mx-auto">
+                Stop copying and pasting templates. Build a scalable pipeline that sounds like you wrote every email by hand.
+              </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+            <div className="grid md:grid-cols-3 gap-6">
               {[
                 {
-                  icon: <Upload className="h-6 w-6" />,
-                  title: "1. Upload Leads",
-                  desc: "Drop your CSV or XLSX. We automatically parse columns for names, vehicles, routes, and pricing."
+                  icon: Upload,
+                  step: "01",
+                  title: "Upload your leads",
+                  desc: "Drop your CSV or XLSX file. We parse names, vehicles, routes, and pricing automatically.",
+                  color: "bg-blue-50 text-blue-600",
                 },
                 {
-                  icon: <Sparkles className="h-6 w-6" />,
-                  title: "2. Generate with AI",
-                  desc: "Vertex AI crafts highly specific, context-aware emails using your templates and preferred tone."
+                  icon: Sparkles,
+                  step: "02",
+                  title: "Generate with AI",
+                  desc: "AI crafts highly specific, context-aware emails using your templates and preferred tone.",
+                  color: "bg-violet-50 text-violet-600",
                 },
                 {
-                  icon: <Send className="h-6 w-6" />,
-                  title: "3. Sync to Gmail",
-                  desc: "Review drafts right in your Gmail account. Just hit send when you're ready to close the deal."
-                }
+                  icon: Send,
+                  step: "03",
+                  title: "Sync to Gmail",
+                  desc: "Review drafts right in your Gmail account. Hit send when you're ready to close the deal.",
+                  color: "bg-emerald-50 text-emerald-600",
+                },
               ].map((step, i) => (
-                <div key={i} className="p-8 rounded-xl border border-border/50 bg-card hover:bg-muted/10 transition-colors">
-                  <div className="h-12 w-12 rounded-lg bg-primary/10 text-primary flex items-center justify-center mb-6">
-                    {step.icon}
+                <motion.div
+                  key={i}
+                  initial={{ opacity: 0, y: 20 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ delay: i * 0.1, duration: 0.4 }}
+                  className="bg-white rounded-2xl border border-slate-200 p-8 shadow-sm hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-center gap-3 mb-5">
+                    <div className={`h-11 w-11 rounded-xl flex items-center justify-center ${step.color}`}>
+                      <step.icon className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-bold text-slate-300 tracking-widest">{step.step}</span>
                   </div>
-                  <h3 className="text-xl font-bold mb-3">{step.title}</h3>
-                  <p className="text-muted-foreground leading-relaxed">{step.desc}</p>
-                </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-2">{step.title}</h3>
+                  <p className="text-slate-500 text-sm leading-relaxed">{step.desc}</p>
+                </motion.div>
               ))}
             </div>
           </div>
         </section>
+
+        {/* CTA */}
+        <section className="py-24 px-6">
+          <div className="container mx-auto max-w-2xl text-center">
+            <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 mx-auto mb-6 flex items-center justify-center shadow-md">
+              <Zap className="h-6 w-6 text-white" />
+            </div>
+            <h2 className="text-3xl font-bold text-slate-900 mb-4">
+              Ready to scale your outreach?
+            </h2>
+            <p className="text-slate-500 mb-8 leading-relaxed">
+              Join brokers who are already using AI to send better, faster, more personal outreach.
+            </p>
+            <Button size="lg" className="h-12 px-10 rounded-xl shadow-md font-medium" asChild>
+              <Link href="/register">Get started for free</Link>
+            </Button>
+          </div>
+        </section>
       </main>
 
-      <footer className="py-12 border-t border-border/40 bg-background text-center text-muted-foreground">
-        <div className="flex items-center justify-center gap-2 mb-4">
-          <Zap className="h-5 w-5 text-primary" />
-          <span className="font-bold text-foreground">Vertex Mailer</span>
+      <footer className="py-10 border-t border-slate-100 bg-white">
+        <div className="container mx-auto px-6 max-w-6xl flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div className="h-6 w-6 rounded-md bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
+              <Zap className="h-3.5 w-3.5 text-white" />
+            </div>
+            <span className="font-semibold text-slate-900 text-sm">Vertex Mailer</span>
+          </div>
+          <p className="text-xs text-slate-400">Engineered for vehicle shipping brokers.</p>
         </div>
-        <p className="text-sm">Engineered for vehicle shipping brokers.</p>
       </footer>
     </div>
   );

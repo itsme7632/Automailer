@@ -67,93 +67,84 @@
 }
 
 :root {
-  --button-outline: rgba(255, 255, 255, 0.10);
-  --badge-outline: rgba(255, 255, 255, 0.05);
-  --opaque-button-border-intensity: 9;
-  --elevate-1: rgba(255, 255, 255, 0.04);
-  --elevate-2: rgba(255, 255, 255, 0.09);
+  --button-outline: rgba(0, 0, 0, 0.06);
+  --badge-outline: rgba(0, 0, 0, 0.04);
+  --opaque-button-border-intensity: -6;
+  --elevate-1: rgba(0, 0, 0, 0.025);
+  --elevate-2: rgba(0, 0, 0, 0.05);
 
-  /* Defaulting to dark theme as required */
-  --background: 224 71% 4%;
-  --foreground: 213 31% 91%;
-  
-  --border: 216 34% 17%;
-  --input: 216 34% 17%;
-  --ring: 224 76% 48%;
-  
-  --card: 222 47% 11%;
-  --card-foreground: 213 31% 91%;
-  --card-border: 216 34% 17%;
-  
-  --popover: 224 71% 4%;
-  --popover-foreground: 215 20.2% 65.1%;
-  --popover-border: 216 34% 17%;
-  
-  --primary: 224 76% 48%;
-  --primary-foreground: 210 40% 98%;
-  
-  --secondary: 222 47% 11%;
-  --secondary-foreground: 210 40% 98%;
-  
-  --muted: 223 47% 11%;
-  --muted-foreground: 215 20.2% 65.1%;
-  
-  --accent: 216 34% 17%;
-  --accent-foreground: 210 40% 98%;
-  
-  --destructive: 359 51% 48%;
-  --destructive-foreground: 210 40% 98%;
+  /* ── Light Theme ── */
+  --background: 220 20% 97%;          /* #F5F7FB */
+  --foreground: 222 47% 11%;          /* #0F172A */
 
-  --sidebar: 224 71% 4%;
-  --sidebar-foreground: 213 31% 91%;
-  --sidebar-border: 216 34% 17%;
-  --sidebar-primary: 224 76% 48%;
-  --sidebar-primary-foreground: 210 40% 98%;
-  --sidebar-accent: 216 34% 17%;
-  --sidebar-accent-foreground: 210 40% 98%;
-  --sidebar-ring: 224 76% 48%;
-  
-  --chart-1: 224 76% 48%;
+  --border: 214 32% 91%;              /* #E2E8F0 */
+  --input: 0 0% 100%;
+  --ring: 221 83% 53%;                /* #2563EB */
+
+  --card: 0 0% 100%;                  /* #FFFFFF */
+  --card-foreground: 222 47% 11%;
+  --card-border: 214 32% 91%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --popover-border: 214 32% 91%;
+
+  --primary: 221 83% 53%;             /* #2563EB */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 40% 96%;           /* #F1F5F9 */
+  --secondary-foreground: 222 47% 11%;
+
+  --muted: 210 40% 96%;               /* #F1F5F9 */
+  --muted-foreground: 215 20% 45%;    /* #64748B */
+
+  --accent: 221 100% 96%;             /* #EFF6FF */
+  --accent-foreground: 221 83% 43%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+
+  --sidebar: 0 0% 100%;               /* white sidebar */
+  --sidebar-foreground: 222 47% 11%;
+  --sidebar-border: 214 32% 91%;
+  --sidebar-primary: 221 83% 53%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 221 100% 96%;
+  --sidebar-accent-foreground: 221 83% 43%;
+  --sidebar-ring: 221 83% 53%;
+
+  --chart-1: 221 83% 53%;
   --chart-2: 199 89% 48%;
-  --chart-3: 326 100% 74%;
-  --chart-4: 43 74% 66%;
-  --chart-5: 27 87% 67%;
+  --chart-3: 326 100% 60%;
+  --chart-4: 43 74% 60%;
+  --chart-5: 27 87% 60%;
 
-  --app-font-sans: 'Inter', sans-serif;
+  --app-font-sans: 'Inter', system-ui, sans-serif;
   --app-font-serif: Georgia, serif;
-  --app-font-mono: Menlo, monospace;
-  
-  --radius: 0.25rem;
+  --app-font-mono: 'JetBrains Mono', Menlo, monospace;
 
-  --shadow-2xs: 0px 1px 2px 0px rgba(0, 0, 0, 0.4);
-  --shadow-xs: 0px 1px 3px 0px rgba(0, 0, 0, 0.5);
-  --shadow-sm: 0px 2px 4px 0px rgba(0, 0, 0, 0.6);
-  --shadow: 0px 4px 6px -1px rgba(0, 0, 0, 0.6), 0px 2px 4px -2px rgba(0, 0, 0, 0.6);
-  --shadow-md: 0px 6px 8px -2px rgba(0, 0, 0, 0.6), 0px 3px 6px -3px rgba(0, 0, 0, 0.6);
-  --shadow-lg: 0px 10px 15px -3px rgba(0, 0, 0, 0.6), 0px 4px 6px -4px rgba(0, 0, 0, 0.6);
-  --shadow-xl: 0px 20px 25px -5px rgba(0, 0, 0, 0.6), 0px 8px 10px -6px rgba(0, 0, 0, 0.6);
-  --shadow-2xl: 0px 25px 50px -12px rgba(0, 0, 0, 0.6);
+  --radius: 0.5rem;
+
+  /* Soft light-mode shadows */
+  --shadow-2xs: 0px 1px 2px 0px rgba(15, 23, 42, 0.04);
+  --shadow-xs:  0px 1px 3px 0px rgba(15, 23, 42, 0.06), 0px 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-sm:  0px 2px 4px 0px rgba(15, 23, 42, 0.06), 0px 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow:     0px 4px 6px -1px rgba(15, 23, 42, 0.07), 0px 2px 4px -2px rgba(15, 23, 42, 0.05);
+  --shadow-md:  0px 6px 10px -2px rgba(15, 23, 42, 0.08), 0px 3px 6px -3px rgba(15, 23, 42, 0.05);
+  --shadow-lg:  0px 10px 15px -3px rgba(15, 23, 42, 0.08), 0px 4px 6px -4px rgba(15, 23, 42, 0.04);
+  --shadow-xl:  0px 20px 25px -5px rgba(15, 23, 42, 0.08), 0px 8px 10px -6px rgba(15, 23, 42, 0.04);
+  --shadow-2xl: 0px 25px 50px -12px rgba(15, 23, 42, 0.10);
+
   --tracking-normal: 0em;
   --spacing: 0.25rem;
 
-  --sidebar-primary-border: hsl(var(--sidebar-primary));
   --sidebar-primary-border: hsl(from hsl(var(--sidebar-primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --sidebar-accent-border: hsl(var(--sidebar-accent));
   --sidebar-accent-border: hsl(from hsl(var(--sidebar-accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --primary-border: hsl(var(--primary));
   --primary-border: hsl(from hsl(var(--primary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --secondary-border: hsl(var(--secondary));
   --secondary-border: hsl(from hsl(var(--secondary)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --muted-border: hsl(var(--muted));
   --muted-border: hsl(from hsl(var(--muted)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --accent-border: hsl(var(--accent));
   --accent-border: hsl(from hsl(var(--accent)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-  --destructive-border: hsl(var(--destructive));
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
-}
-
-.dark {
-  /* Use the exact same variables as root because dark is the default vibe */
 }
 
 @layer base {
@@ -163,6 +154,11 @@
 
   body {
     @apply font-sans antialiased bg-background text-foreground;
+  }
+
+  /* Smooth focus rings */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
 
