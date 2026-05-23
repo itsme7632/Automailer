@@ -96,13 +96,16 @@ export async function getGmailClient(user: User) {
 
 /**
  * Create a Gmail draft for `to` from the authenticated `user`.
+ * If `bodyHtml` is provided, creates a multipart/alternative MIME message
+ * with both plain-text and HTML parts (HTML is rendered in Gmail).
  * Returns the Gmail draft ID or throws a descriptive error.
  */
 export async function createGmailDraft(
   user: User,
   to: string,
   subject: string,
-  body: string
+  bodyText: string,
+  bodyHtml?: string
 ): Promise<string> {
   if (!user.gmailAccessToken) {
     throw new Error("Gmail not connected — please reconnect Gmail in Settings.");
@@ -114,18 +117,47 @@ export async function createGmailDraft(
   }
 
   const gmail = await getGmailClient(user);
-
-  // Build a valid RFC 2822 message. Use CRLF line endings as required.
   const subjectEncoded = `=?UTF-8?B?${Buffer.from(subject, "utf-8").toString("base64")}?=`;
-  const rawMessage = [
-    `To: ${to}`,
-    `Subject: ${subjectEncoded}`,
-    "MIME-Version: 1.0",
-    "Content-Type: text/plain; charset=UTF-8",
-    "Content-Transfer-Encoding: quoted-printable",
-    "",
-    body,
-  ].join("\r\n");
+  const boundary = "====VERTEX_MAILER_BOUNDARY====";
+
+  let rawMessage: string;
+
+  if (bodyHtml) {
+    // Multipart/alternative: text first (fallback), then HTML (preferred)
+    const textB64 = Buffer.from(bodyText, "utf-8").toString("base64");
+    const htmlB64 = Buffer.from(bodyHtml, "utf-8").toString("base64");
+
+    rawMessage = [
+      `To: ${to}`,
+      `Subject: ${subjectEncoded}`,
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      textB64,
+      "",
+      `--${boundary}`,
+      "Content-Type: text/html; charset=UTF-8",
+      "Content-Transfer-Encoding: base64",
+      "",
+      htmlB64,
+      "",
+      `--${boundary}--`,
+    ].join("\r\n");
+  } else {
+    rawMessage = [
+      `To: ${to}`,
+      `Subject: ${subjectEncoded}`,
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=UTF-8",
+      "Content-Transfer-Encoding: quoted-printable",
+      "",
+      bodyText,
+    ].join("\r\n");
+  }
 
   const encoded = Buffer.from(rawMessage)
     .toString("base64")
@@ -142,14 +174,11 @@ export async function createGmailDraft(
     });
     return draft.data.id ?? "";
   } catch (err: any) {
-    // Translate Google API error codes into human-readable messages
     const status = err?.response?.status ?? err?.status;
     const reason = err?.response?.data?.error?.message ?? err?.message ?? String(err);
 
     if (status === 401) {
-      throw new Error(
-        "Gmail authentication expired — please reconnect Gmail in Settings."
-      );
+      throw new Error("Gmail authentication expired — please reconnect Gmail in Settings.");
     }
     if (status === 403) {
       throw new Error(

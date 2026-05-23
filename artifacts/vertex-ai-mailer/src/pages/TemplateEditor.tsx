@@ -11,15 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Loader2, Eye } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Eye, Code2 } from "lucide-react";
 
-// All standard chips + reminder that any CSV column works
 const CHIPS = [
   "{name}", "{email}", "{vehicle}", "{pickup}", "{delivery}",
-  "{price}", "{route}", "{company}", "{phone}", "{notes}",
+  "{price}", "{route}", "{company}", "{agent_name}", "{phone}", "{notes}",
 ];
 
-// Sample data used for live preview substitution
 const SAMPLE_DATA: Record<string, string> = {
   name: "Alex Johnson",
   email: "alex@example.com",
@@ -28,13 +26,61 @@ const SAMPLE_DATA: Record<string, string> = {
   delivery: "Seattle, WA",
   price: "$1,250",
   route: "FL → WA",
-  company: "Swift Transport LLC",
-  phone: "(555) 123-4567",
+  company: "Vertex Carship",
+  agent_name: "Frank Miller",
+  phone: "(832) 304-8468",
   notes: "Enclosed transport preferred",
 };
 
 function replaceVariables(text: string, data: Record<string, string>): string {
   return text.replace(/\{([^}]+)\}/g, (match, key) => data[key.trim()] ?? match);
+}
+
+function buildSimpleHtmlPreview(body: string, subject: string, data: Record<string, string>): string {
+  const company = data.company ?? "";
+  const agentName = data.agent_name ?? "";
+  const phone = data.phone ?? "";
+
+  const replacedBody = body.replace(/\{([^}]+)\}/g, (match, key) => {
+    const k = key.trim();
+    const val = data[k];
+    if (!val) return `<span style="color:#ef4444;font-style:italic;">${match}</span>`;
+    if (k === "price") return `<strong style="color:#059669;font-size:15px;">${val}</strong>`;
+    if (["vehicle", "pickup", "delivery", "route"].includes(k)) return `<strong>${val}</strong>`;
+    if (k === "name") return `<strong>${val}</strong>`;
+    return val;
+  });
+
+  const paragraphs = replacedBody
+    .split(/\n\n+/)
+    .filter(p => p.trim())
+    .map(p => `<p style="margin:0 0 14px;color:#374151;font-size:14px;line-height:1.7;">${p.trim().replace(/\n/g, "<br>")}</p>`)
+    .join("");
+
+  const footer = agentName
+    ? `<div style="margin-top:24px;padding-top:16px;border-top:1px solid #e2e8f0;">
+        <p style="margin:0;color:#64748b;font-size:13px;line-height:1.8;">Best regards,<br>
+        <strong style="color:#1e293b;">${agentName}</strong><br>
+        ${company ? `${company}<br>` : ""}${phone || ""}</p>
+       </div>`
+    : "";
+
+  const subjectReplaced = subject
+    ? subject.replace(/\{([^}]+)\}/g, (match, key) => data[key.trim()] ?? match)
+    : "";
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;">
+<div style="max-width:580px;margin:20px auto;">
+  <div style="background:#1d4ed8;padding:20px 28px;border-radius:8px 8px 0 0;">
+    <p style="color:#fff;font-size:17px;font-weight:700;margin:0 0 4px;">${company || "Vertex Carship"}</p>
+    <p style="color:#93c5fd;font-size:11px;margin:0;">Vehicle Transportation Services</p>
+  </div>
+  ${subjectReplaced ? `<div style="background:#eff6ff;padding:12px 28px;border-left:3px solid #3b82f6;"><p style="margin:0;font-size:13px;font-weight:600;color:#1e40af;">Subject: ${subjectReplaced}</p></div>` : ""}
+  <div style="background:#fff;padding:28px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px;">
+    ${paragraphs}${footer}
+  </div>
+</div></body></html>`;
 }
 
 export default function TemplateEditor() {
@@ -50,6 +96,7 @@ export default function TemplateEditor() {
   const [name, setName] = useState("");
   const [subject, setSubject] = useState("");
   const [body, setBody] = useState("");
+  const [previewMode, setPreviewMode] = useState<"text" | "html">("text");
 
   const initializedForId = useRef<number | null>(null);
   useEffect(() => {
@@ -65,6 +112,7 @@ export default function TemplateEditor() {
 
   const previewSubject = useMemo(() => replaceVariables(subject, SAMPLE_DATA), [subject]);
   const previewBody    = useMemo(() => replaceVariables(body, SAMPLE_DATA),    [body]);
+  const htmlPreview    = useMemo(() => buildSimpleHtmlPreview(body, subject, SAMPLE_DATA), [body, subject]);
 
   const handleSave = () => {
     updateTemplate.mutate(
@@ -125,9 +173,7 @@ export default function TemplateEditor() {
           </div>
 
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium text-slate-700">Body</label>
-            </div>
+            <label className="text-sm font-medium text-slate-700">Body</label>
             {/* Variable chips */}
             <div className="flex gap-1.5 flex-wrap">
               {CHIPS.map(chip => (
@@ -140,55 +186,89 @@ export default function TemplateEditor() {
                 </button>
               ))}
             </div>
-            <p className="text-xs text-slate-400">Any CSV column header also works as a variable — e.g. <code className="font-mono bg-slate-100 px-1 rounded">{"{transport_type}"}</code></p>
+            <p className="text-xs text-slate-400">
+              Any CSV column header also works — e.g. <code className="font-mono bg-slate-100 px-1 rounded">{"{transport_type}"}</code>
+            </p>
             <Textarea
               value={body}
               onChange={e => setBody(e.target.value)}
               className="min-h-[360px] font-mono text-sm rounded-xl resize-none"
-              placeholder={"Hi {name},\n\nI can get your {vehicle} shipped from {pickup} to {delivery} for {price}.\n\nLet me know if you'd like to move forward.\n\nBest regards,"}
+              placeholder={"Hi {name},\n\nI can get your {vehicle} shipped from {pickup} to {delivery} for {price}.\n\nLet me know if you'd like to move forward.\n\nBest regards,\n{agent_name}\n{company}\n{phone}"}
             />
           </div>
         </div>
 
         {/* ── Right: live preview ── */}
         <div className="bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm">
-          {/* Header */}
+          {/* Header with toggle */}
           <div className="h-12 border-b border-slate-100 bg-slate-50/60 px-5 flex items-center gap-2">
             <Eye className="h-4 w-4 text-slate-400" />
             <h3 className="font-semibold text-slate-700 text-sm">Live Preview</h3>
-            <span className="ml-auto text-xs text-slate-400">Updates as you type</span>
-          </div>
-
-          <div className="p-6 flex-1 space-y-6 bg-white min-h-[300px]">
-            {/* Sample data notice */}
-            <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700">
-              <span className="font-medium">Sample data:</span>
-              <span className="text-blue-600">Alex Johnson · Tesla Model Y · Miami → Seattle</span>
+            <div className="ml-auto flex items-center gap-1">
+              <button
+                onClick={() => setPreviewMode("text")}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors ${
+                  previewMode === "text"
+                    ? "bg-slate-200 text-slate-900 font-medium"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                <Code2 className="h-3 w-3" /> Plain
+              </button>
+              <button
+                onClick={() => setPreviewMode("html")}
+                className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-lg transition-colors ${
+                  previewMode === "html"
+                    ? "bg-blue-100 text-blue-800 font-medium"
+                    : "text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                <Eye className="h-3 w-3" /> HTML
+              </button>
             </div>
-
-            {subject ? (
-              <div>
-                <div className="text-xs text-slate-400 uppercase font-semibold tracking-wider mb-1.5">Subject</div>
-                <div className="font-semibold text-slate-900 text-sm">{previewSubject}</div>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-300 italic">Add a subject line…</div>
-            )}
-
-            {body ? (
-              <div>
-                <div className="text-xs text-slate-400 uppercase font-semibold tracking-wider mb-1.5">Body</div>
-                <div className="whitespace-pre-wrap text-sm text-slate-700 leading-relaxed font-mono bg-slate-50 rounded-xl p-4 border border-slate-100">
-                  {previewBody}
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs text-slate-300 italic">Add body text…</div>
-            )}
           </div>
+
+          {previewMode === "html" ? (
+            <div className="flex-1 overflow-hidden" style={{ minHeight: "420px" }}>
+              <iframe
+                srcDoc={htmlPreview}
+                title="HTML Email Preview"
+                className="w-full h-full border-0"
+                style={{ minHeight: "420px" }}
+                sandbox="allow-same-origin"
+              />
+            </div>
+          ) : (
+            <div className="p-6 flex-1 space-y-6 bg-white min-h-[300px]">
+              {/* Sample data notice */}
+              <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700">
+                <span className="font-medium">Sample data:</span>
+                <span className="text-blue-600">Alex Johnson · Tesla Model Y · Miami → Seattle · $1,250</span>
+              </div>
+
+              {subject ? (
+                <div>
+                  <div className="text-xs text-slate-400 uppercase font-semibold tracking-wider mb-1.5">Subject</div>
+                  <div className="font-semibold text-slate-900 text-sm">{previewSubject}</div>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-300 italic">Add a subject line…</div>
+              )}
+
+              {body ? (
+                <div>
+                  <div className="text-xs text-slate-400 uppercase font-semibold tracking-wider mb-1.5">Body</div>
+                  <div className="whitespace-pre-wrap text-sm text-slate-700 leading-relaxed font-mono bg-slate-50 rounded-xl p-4 border border-slate-100">
+                    {previewBody}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-slate-300 italic">Add body text…</div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
   );
 }
-

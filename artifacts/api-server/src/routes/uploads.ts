@@ -30,7 +30,7 @@ const COLUMN_ALIASES: Record<string, string> = {
   "e_mail": "email",
   "mail": "email",
 
-  // Vehicle
+  // Vehicle — must contain text, not just a number
   "vehicle": "vehicle",
   "vehicle type": "vehicle",
   "vehicle_type": "vehicle",
@@ -101,8 +101,13 @@ const COLUMN_ALIASES: Record<string, string> = {
   "shipping rate": "price",
   "shipping_rate": "price",
   "transport cost": "price",
+  "transport_cost": "price",
+  "transport price": "price",
+  "transport_price": "price",
   "total": "price",
   "fee": "price",
+  "bid": "price",
+  "offer": "price",
 
   // Company
   "company": "company",
@@ -141,19 +146,57 @@ function detectColumn(header: string): string | null {
   return null;
 }
 
+/**
+ * Returns true only if this value looks like a real vehicle description.
+ * Rejects purely numeric values (e.g., "425") which are prices, not vehicles.
+ */
+function isValidVehicleValue(val: string): boolean {
+  const trimmed = val.trim();
+  // Purely numeric (with optional $ or commas) → NOT a vehicle
+  if (/^\$?[\d,]+\.?\d*$/.test(trimmed)) return false;
+  // Very short single tokens that are all digits → not a vehicle
+  if (/^\d+$/.test(trimmed)) return false;
+  return trimmed.length > 0;
+}
+
+/**
+ * Returns true if a value looks like a currency / numeric amount.
+ * Used as a hint when we need to prefer "price" mapping over others.
+ */
+function looksLikePrice(val: string): boolean {
+  return /^\$?[\d,]+\.?\d*$/.test(val.trim());
+}
+
 function mapRow(headers: string[], row: Record<string, string>): Record<string, string | null> {
   const mapped: Record<string, string | null> = {
     name: null, email: null, vehicle: null, route: null,
     pickup: null, delivery: null, price: null, notes: null,
     company: null, phone: null,
   };
+
   for (const header of headers) {
     const field = detectColumn(header);
-    if (field && row[header] && !mapped[field]) {
-      const val = String(row[header]).trim();
-      if (val) mapped[field] = val;
+    if (!field) continue;
+    if (mapped[field]) continue; // already filled by an earlier column
+
+    const val = String(row[header] ?? "").trim();
+    if (!val) continue;
+
+    // Validation gates
+    if (field === "vehicle" && !isValidVehicleValue(val)) continue;
+
+    // If a column is mapped to a non-price field but has a numeric value,
+    // try reassigning it to price if price is still empty.
+    if (field !== "price" && field !== "email" && field !== "phone" && looksLikePrice(val)) {
+      if (!mapped["price"]) {
+        mapped["price"] = val;
+      }
+      continue;
     }
+
+    mapped[field] = val;
   }
+
   return mapped;
 }
 

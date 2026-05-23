@@ -4,6 +4,7 @@ import { eq, and, count, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { GetDraftParams } from "@workspace/api-zod";
 import { createGmailDraft } from "../lib/gmail";
+import { formatPrice, replaceVarsText, buildHtmlEmail } from "../lib/email-html";
 
 const router: IRouter = Router();
 
@@ -42,8 +43,7 @@ router.get("/drafts/:id", requireAuth, async (req, res): Promise<void> => {
 });
 
 /**
- * Direct draft creation — used by the AI Followups workflow.
- * Creates a Gmail draft from raw to/subject/body without needing a lead record.
+ * Direct draft creation — creates a Gmail draft from raw to/subject/body.
  */
 router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
@@ -78,21 +78,26 @@ router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void
 });
 
 /**
- * Core new workflow: create Gmail drafts from a saved template + CSV row data.
- * Replaces {variable} placeholders in subject/body with row values.
- * Does NOT require AI — purely variable substitution.
+ * Core workflow: create HTML Gmail drafts from a saved template + CSV row data.
+ * - Replaces {variable} placeholders with row values
+ * - Formats price values automatically (425 → $425, 1200 → $1,200)
+ * - Generates a professional HTML email with the selected style
+ * - Sends multipart/alternative MIME (plain text + HTML) to Gmail
  */
 router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { templateId, rows } = req.body as {
+  const { templateId, rows, style } = req.body as {
     templateId?: number;
     rows?: Record<string, string>[];
+    style?: string;
   };
 
   if (!templateId || !Array.isArray(rows) || rows.length === 0) {
     res.status(400).json({ error: "templateId and a non-empty rows[] are required" });
     return;
   }
+
+  const emailStyle = (["clean", "modern", "minimal", "luxury"].includes(style ?? "")) ? style! : "clean";
 
   const [template] = await db
     .select()
@@ -113,10 +118,6 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  function replaceVars(text: string, row: Record<string, string>): string {
-    return text.replace(/\{([^}]+)\}/g, (match, key) => row[key.trim()] ?? match);
-  }
-
   const results: {
     email: string;
     subject: string;
@@ -127,24 +128,29 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
   let succeeded = 0;
   let failed = 0;
 
-  for (const row of rows) {
-    const email = row.email ?? "";
+  for (const rawRow of rows) {
+    const email = rawRow.email ?? "";
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       results.push({ email, subject: "", status: "failed", error: "Missing or invalid email" });
       failed++;
       continue;
     }
 
-    const subject = replaceVars(template.subject, row);
-    const body = replaceVars(template.body, row);
+    // Build a row with price pre-formatted so plain text also shows $
+    const row: Record<string, string> = { ...rawRow };
+    if (row.price) row.price = formatPrice(row.price);
+
+    const subject = replaceVarsText(template.subject, row);
+    const bodyText = replaceVarsText(template.body, row);
+    const bodyHtml = buildHtmlEmail(template.body, row, emailStyle);
 
     try {
-      const gmailDraftId = await createGmailDraft(freshUser, email, subject, body);
+      const gmailDraftId = await createGmailDraft(freshUser, email, subject, bodyText, bodyHtml);
       await db.insert(draftsTable).values({
         userId: user.id,
         gmailDraftId,
         subject,
-        body,
+        body: bodyText,
         status: "success",
       });
       results.push({ email, subject, status: "success", gmailDraftId });
@@ -154,7 +160,7 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
       await db.insert(draftsTable).values({
         userId: user.id,
         subject,
-        body,
+        body: bodyText,
         status: "failed",
         errorMessage: errMsg,
       });
@@ -168,7 +174,7 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
       userId: user.id,
       type: "drafts_generated",
       description: `Created ${succeeded} Gmail draft${succeeded !== 1 ? "s" : ""} from template "${template.name}"${failed > 0 ? ` (${failed} failed)` : ""}`,
-      metadata: { templateId, total: rows.length, succeeded, failed },
+      metadata: { templateId, total: rows.length, succeeded, failed, style: emailStyle },
     });
   } catch { /* non-fatal */ }
 
