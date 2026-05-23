@@ -16,14 +16,19 @@ router.get("/gmail/status", requireAuth, async (req, res): Promise<void> => {
 });
 
 /**
- * Start the Gmail OAuth connect flow for the currently logged-in user.
- * Redirects to Google with state="gmail-connect:<userId>".
- * The callback is handled by /api/auth/callback (the unified OAuth handler).
+ * Return the Google OAuth URL for connecting Gmail.
+ *
+ * The frontend must call this endpoint with the JWT Authorization header,
+ * then redirect the browser to the returned `authUrl`. A direct browser
+ * navigation to this route would fail with 401 because no auth header is sent.
+ *
+ *   const { authUrl } = await fetch('/api/gmail/connect', { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+ *   window.location.href = authUrl;
  */
 router.get("/gmail/connect", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
-  const url = getGmailAuthUrl(user.id);
-  res.redirect(url);
+  const authUrl = getGmailAuthUrl(user.id);
+  res.json({ authUrl });
 });
 
 router.post("/gmail/disconnect", requireAuth, async (req, res): Promise<void> => {
