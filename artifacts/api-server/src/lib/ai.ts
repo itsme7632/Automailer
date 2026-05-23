@@ -2,6 +2,28 @@ import OpenAI from "openai";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
+// ---------------------------------------------------------------------------
+// Typed AI errors (caught in routes to return friendly HTTP responses)
+// ---------------------------------------------------------------------------
+
+export class AiRateLimitError extends Error {
+  constructor(message = "OpenAI rate limit hit") {
+    super(message);
+    this.name = "AiRateLimitError";
+  }
+}
+
+export class AiQuotaError extends Error {
+  constructor(message = "OpenAI quota exceeded") {
+    super(message);
+    this.name = "AiQuotaError";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 export interface EmailGenerationOptions {
   name: string;
   email: string;
@@ -16,6 +38,10 @@ export interface EmailGenerationOptions {
   tone: string;
   customPrompt?: string | null;
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function applyTemplateVars(text: string, data: EmailGenerationOptions): string {
   return text
@@ -35,7 +61,13 @@ const TONE_DESCRIPTIONS: Record<string, string> = {
   urgent: "creates urgency while remaining professional",
 };
 
-export async function generatePersonalizedEmail(opts: EmailGenerationOptions): Promise<{ subject: string; body: string; tone: string }> {
+// ---------------------------------------------------------------------------
+// Main generation function
+// ---------------------------------------------------------------------------
+
+export async function generatePersonalizedEmail(
+  opts: EmailGenerationOptions
+): Promise<{ subject: string; body: string; tone: string }> {
   const baseSubject = applyTemplateVars(opts.templateSubject, opts);
   const baseBody = applyTemplateVars(opts.templateBody, opts);
   const toneDesc = TONE_DESCRIPTIONS[opts.tone] ?? "professional";
@@ -62,22 +94,38 @@ ${opts.customPrompt ? `Additional instructions: ${opts.customPrompt}` : ""}
 Return JSON only with this exact shape:
 {"subject": "...", "body": "..."}`;
 
-  const response = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
-    max_tokens: 1024,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    response_format: { type: "json_object" },
-  });
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 1024,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ],
+      response_format: { type: "json_object" },
+    });
 
-  const content = response.choices[0]?.message?.content ?? "{}";
-  const parsed = JSON.parse(content) as { subject?: string; body?: string };
+    const content = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(content) as { subject?: string; body?: string };
 
-  return {
-    subject: parsed.subject ?? baseSubject,
-    body: parsed.body ?? baseBody,
-    tone: opts.tone,
-  };
+    return {
+      subject: parsed.subject ?? baseSubject,
+      body: parsed.body ?? baseBody,
+      tone: opts.tone,
+    };
+  } catch (err: unknown) {
+    // OpenAI SDK throws typed errors — map them to our domain errors
+    if (err instanceof OpenAI.RateLimitError) {
+      const msg = err.message ?? "";
+      // "insufficient_quota" or "You exceeded your current quota"
+      if (msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("insufficient")) {
+        throw new AiQuotaError(msg);
+      }
+      throw new AiRateLimitError(msg);
+    }
+    if (err instanceof OpenAI.APIError && err.status === 429) {
+      throw new AiRateLimitError(err.message);
+    }
+    throw err;
+  }
 }
