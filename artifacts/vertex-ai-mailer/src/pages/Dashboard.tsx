@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { useGetDashboardStats, useGetRecentCampaigns, useGetDashboardActivity, useGetGmailStatus } from "@workspace/api-client-react";
+import { useGetDashboardStats, useGetDashboardActivity, useGetGmailStatus, useGetDrafts } from "@workspace/api-client-react";
 import { useAuth } from "@/context/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import {
-  BarChart3, Mail, CheckCircle2, AlertCircle, Clock,
-  Plus, ArrowRight, Zap, Users, TrendingUp,
+  Mail, CheckCircle2, AlertCircle, Clock,
+  ArrowRight, FileText, UploadCloud, TrendingUp,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -56,9 +56,9 @@ function StatCard({
 export default function Dashboard() {
   const { user } = useAuth();
   const { data: stats, isLoading: statsLoading } = useGetDashboardStats();
-  const { data: campaigns, isLoading: campaignsLoading } = useGetRecentCampaigns({ limit: 5 });
   const { data: activity, isLoading: activityLoading } = useGetDashboardActivity({ limit: 10 });
   const { data: gmailStatus, isLoading: gmailLoading } = useGetGmailStatus();
+  const { data: recentDrafts, isLoading: draftsLoading } = useGetDrafts({ page: 1, limit: 5 });
   const [connectingGmail, setConnectingGmail] = useState(false);
 
   async function handleConnectGmail() {
@@ -83,14 +83,14 @@ export default function Dashboard() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            Good morning, {firstName} 👋
+            Welcome back, {firstName}
           </h1>
-          <p className="text-slate-500 mt-1 text-sm">Here's what's happening with your outreach today.</p>
+          <p className="text-slate-500 mt-1 text-sm">Upload a spreadsheet, pick a template, and create Gmail drafts in seconds.</p>
         </div>
         <Button asChild className="gap-2 rounded-xl shadow-sm">
-          <Link href="/campaigns">
-            <Plus className="h-4 w-4" />
-            New Campaign
+          <Link href="/leads/import">
+            <UploadCloud className="h-4 w-4" />
+            Upload & Send
           </Link>
         </Button>
       </div>
@@ -106,8 +106,8 @@ export default function Dashboard() {
             <AlertCircle className="h-5 w-5 text-amber-600" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-amber-900 text-sm">Connect Gmail to start syncing drafts</p>
-            <p className="text-amber-700 text-xs mt-0.5">Your AI-generated emails will be saved as Gmail drafts — never auto-sent.</p>
+            <p className="font-semibold text-amber-900 text-sm">Connect Gmail to start creating drafts</p>
+            <p className="text-amber-700 text-xs mt-0.5">Your emails will be saved as Gmail drafts — never auto-sent.</p>
           </div>
           <Button
             size="sm"
@@ -121,78 +121,94 @@ export default function Dashboard() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         {[
-          { title: "Active Campaigns", value: stats?.activeCampaigns, icon: BarChart3, color: "blue" as const },
-          { title: "Total Leads",      value: stats?.totalLeads,      icon: Users,    color: "violet" as const },
-          { title: "Drafts Created",   value: stats?.totalDraftsCreated, icon: Mail,  color: "emerald" as const },
-          { title: "Success Rate",     value: stats?.draftSuccessRate ? `${stats.draftSuccessRate}%` : "0%", icon: TrendingUp, color: "amber" as const },
+          { title: "Drafts Created",  value: stats?.totalDraftsCreated, icon: Mail,       color: "blue" as const },
+          { title: "Success Rate",    value: stats?.draftSuccessRate ? `${stats.draftSuccessRate}%` : "—", icon: TrendingUp, color: "emerald" as const },
+          { title: "Gmail",           value: gmailStatus?.connected ? (gmailStatus.email ?? "Connected") : "Not connected", icon: Mail, color: "amber" as const },
         ].map((card, i) => (
           <motion.div key={card.title} custom={i} initial="hidden" animate="show" variants={fadeUp}>
-            <StatCard {...card} loading={statsLoading} />
+            <StatCard {...card} loading={statsLoading || gmailLoading} />
           </motion.div>
         ))}
       </div>
 
+      {/* Quick actions */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Link href="/leads/import">
+          <div className="group bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-200 transition-all p-6 flex items-center gap-4 cursor-pointer">
+            <div className="h-12 w-12 rounded-xl bg-blue-50 ring-1 ring-blue-100 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-100 transition-colors">
+              <UploadCloud className="h-5 w-5 text-blue-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-slate-900 text-sm">Upload & Send</p>
+              <p className="text-xs text-slate-500 mt-0.5">Upload CSV/XLSX and create Gmail drafts from a template</p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-blue-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+          </div>
+        </Link>
+
+        <Link href="/templates">
+          <div className="group bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-violet-200 transition-all p-6 flex items-center gap-4 cursor-pointer">
+            <div className="h-12 w-12 rounded-xl bg-violet-50 ring-1 ring-violet-100 flex items-center justify-center flex-shrink-0 group-hover:bg-violet-100 transition-colors">
+              <FileText className="h-5 w-5 text-violet-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-slate-900 text-sm">Email Templates</p>
+              <p className="text-xs text-slate-500 mt-0.5">Write templates with dynamic variables like {"{name}"} and {"{vehicle}"}</p>
+            </div>
+            <ArrowRight className="h-4 w-4 text-slate-300 group-hover:text-violet-500 group-hover:translate-x-0.5 transition-all flex-shrink-0" />
+          </div>
+        </Link>
+      </div>
+
       {/* Two-column content */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Recent Campaigns */}
+        {/* Recent Drafts */}
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h2 className="font-semibold text-slate-900">Recent Campaigns</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Your latest outreach efforts</p>
+              <h2 className="font-semibold text-slate-900">Recent Drafts</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Latest Gmail drafts created</p>
             </div>
             <Button variant="ghost" size="sm" asChild className="text-slate-500 hover:text-slate-900 text-xs">
-              <Link href="/campaigns">View all <ArrowRight className="ml-1 h-3.5 w-3.5" /></Link>
+              <Link href="/drafts">View all <ArrowRight className="ml-1 h-3.5 w-3.5" /></Link>
             </Button>
           </div>
           <div className="divide-y divide-slate-50">
-            {campaignsLoading ? (
+            {draftsLoading ? (
               <div className="p-6 space-y-4">
-                {[1, 2, 3].map(i => <Skeleton key={i} className="h-14 w-full rounded-xl" />)}
+                {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full rounded-xl" />)}
               </div>
-            ) : campaigns?.length ? (
-              campaigns.map((campaign) => {
-                const pct = campaign.totalLeads > 0
-                  ? Math.round((campaign.draftedCount / campaign.totalLeads) * 100)
-                  : 0;
-                return (
-                  <div key={campaign.id} className="px-6 py-4 flex items-center gap-4 hover:bg-slate-50/70 transition-colors">
-                    <div className="h-9 w-9 rounded-xl bg-blue-50 flex items-center justify-center flex-shrink-0">
-                      <Mail className="h-4 w-4 text-blue-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <Link href={`/campaigns/${campaign.id}`} className="font-medium text-slate-900 text-sm hover:text-blue-600 transition-colors truncate block">
-                        {campaign.name}
-                      </Link>
-                      <div className="flex items-center gap-3 mt-1">
-                        <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden max-w-[120px]">
-                          <div
-                            className="h-full bg-blue-500 rounded-full transition-all"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-slate-500">{campaign.draftedCount}/{campaign.totalLeads} drafted</span>
-                      </div>
-                    </div>
-                    <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                      campaign.status === "completed" ? "bg-emerald-50 text-emerald-700" :
-                      campaign.status === "pending"   ? "bg-amber-50 text-amber-700" :
-                      campaign.status === "failed"    ? "bg-red-50 text-red-700" :
-                      "bg-slate-100 text-slate-600"
-                    }`}>
-                      {campaign.status}
-                    </span>
+            ) : recentDrafts?.data?.length ? (
+              recentDrafts.data.map((draft) => (
+                <div key={draft.id} className="px-6 py-4 flex items-center gap-4 hover:bg-slate-50/70 transition-colors">
+                  <div className={`h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                    draft.status === "success" ? "bg-emerald-50" : draft.status === "failed" ? "bg-red-50" : "bg-slate-50"
+                  }`}>
+                    <Mail className={`h-4 w-4 ${
+                      draft.status === "success" ? "text-emerald-600" : draft.status === "failed" ? "text-red-500" : "text-slate-400"
+                    }`} />
                   </div>
-                );
-              })
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-slate-900 text-sm truncate">{draft.subject}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{new Date(draft.createdAt).toLocaleDateString()}</p>
+                  </div>
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0 ${
+                    draft.status === "success" ? "bg-emerald-50 text-emerald-700" :
+                    draft.status === "failed"  ? "bg-red-50 text-red-700" :
+                    "bg-slate-100 text-slate-600"
+                  }`}>
+                    {draft.status}
+                  </span>
+                </div>
+              ))
             ) : (
               <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-                <Zap className="h-10 w-10 mb-3 opacity-30" />
-                <p className="text-sm font-medium">No campaigns yet</p>
+                <Mail className="h-10 w-10 mb-3 opacity-30" />
+                <p className="text-sm font-medium">No drafts yet</p>
                 <Button asChild variant="ghost" size="sm" className="mt-3 text-blue-600 hover:text-blue-700">
-                  <Link href="/campaigns">Create your first campaign →</Link>
+                  <Link href="/leads/import">Upload leads to create drafts →</Link>
                 </Button>
               </div>
             )}
@@ -203,7 +219,7 @@ export default function Dashboard() {
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-5 border-b border-slate-100">
             <h2 className="font-semibold text-slate-900">Activity</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Recent system events</p>
+            <p className="text-xs text-slate-500 mt-0.5">Recent events</p>
           </div>
           <div className="p-4 space-y-1">
             {activityLoading ? (

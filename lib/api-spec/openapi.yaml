@@ -757,6 +757,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/DraftRecord"
 
+  /drafts/from-template:
+    post:
+      operationId: createDraftsFromTemplate
+      tags: [drafts]
+      summary: Create Gmail drafts from a template and CSV row data (no AI required)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDraftsFromTemplateInput"
+      responses:
+        "200":
+          description: Draft creation results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateDraftsFromTemplateResult"
+        "400":
+          description: Missing templateId/rows or Gmail not connected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ─── UPLOADS ─────────────────────────────────────────────────────────────────
   /uploads/parse:
     post:
@@ -1333,7 +1364,7 @@ components:
           type: ["string", "null"]
         createdAt:
           type: string
-      required: [id, leadId, userId, subject, body, status, createdAt]
+      required: [id, userId, subject, body, status, createdAt]
 
     PaginatedDrafts:
       type: object
@@ -1377,10 +1408,15 @@ components:
           type: ["string", "null"]
         notes:
           type: ["string", "null"]
+        company:
+          type: ["string", "null"]
+        phone:
+          type: ["string", "null"]
         hasValidEmail:
           type: boolean
         isDuplicate:
           type: boolean
+      additionalProperties: true
       required: [hasValidEmail, isDuplicate]
 
     ParsedFileResult:
@@ -1403,6 +1439,50 @@ components:
           items:
             type: string
       required: [rows, totalRows, validRows, invalidRows, duplicateRows, detectedColumns]
+
+    CreateDraftsFromTemplateInput:
+      type: object
+      properties:
+        templateId:
+          type: integer
+        rows:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+      required: [templateId, rows]
+
+    DraftRowResult:
+      type: object
+      properties:
+        email:
+          type: string
+        subject:
+          type: string
+        status:
+          type: string
+          enum: [success, failed]
+        gmailDraftId:
+          type: string
+        error:
+          type: string
+      required: [email, subject, status]
+
+    CreateDraftsFromTemplateResult:
+      type: object
+      properties:
+        total:
+          type: integer
+        succeeded:
+          type: integer
+        failed:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/DraftRowResult"
+      required: [total, succeeded, failed, results]
 
     # ─── ADMIN ───────────────────────────────────────────────────────────────
     AdminStats:

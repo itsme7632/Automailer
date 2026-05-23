@@ -11,10 +11,6 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
-import Followups from "@/pages/Followups";
-import Campaigns from "@/pages/Campaigns";
-import CampaignDetail from "@/pages/CampaignDetail";
-import Leads from "@/pages/Leads";
 import LeadsImport from "@/pages/LeadsImport";
 import Templates from "@/pages/Templates";
 import TemplateEditor from "@/pages/TemplateEditor";
@@ -46,33 +42,9 @@ function Router() {
         </ProtectedRoute>
       </Route>
 
-      <Route path="/followups">
-        <ProtectedRoute>
-          <AppLayout><Followups /></AppLayout>
-        </ProtectedRoute>
-      </Route>
-
-      <Route path="/campaigns">
-        <ProtectedRoute>
-          <AppLayout><Campaigns /></AppLayout>
-        </ProtectedRoute>
-      </Route>
-
-      <Route path="/campaigns/:id">
-        <ProtectedRoute>
-          <AppLayout><CampaignDetail /></AppLayout>
-        </ProtectedRoute>
-      </Route>
-
       <Route path="/leads/import">
         <ProtectedRoute>
           <AppLayout><LeadsImport /></AppLayout>
-        </ProtectedRoute>
-      </Route>
-
-      <Route path="/leads">
-        <ProtectedRoute>
-          <AppLayout><Leads /></AppLayout>
         </ProtectedRoute>
       </Route>
 

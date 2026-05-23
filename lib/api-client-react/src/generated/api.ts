@@ -30,6 +30,8 @@ import type {
   Campaign,
   CampaignInput,
   CampaignUpdate,
+  CreateDraftsFromTemplateInput,
+  CreateDraftsFromTemplateResult,
   DashboardStats,
   DraftGenerationResult,
   DraftRecord,
@@ -2859,6 +2861,77 @@ export function useGetDraft<TData = Awaited<ReturnType<typeof getDraft>>, TError
 
 
 
+
+export const getCreateDraftsFromTemplateUrl = () => {
+
+
+
+
+  return `/api/drafts/from-template`
+}
+
+/**
+ * @summary Create Gmail drafts from a template and CSV row data (no AI required)
+ */
+export const createDraftsFromTemplate = async (createDraftsFromTemplateInput: CreateDraftsFromTemplateInput, options?: RequestInit): Promise<CreateDraftsFromTemplateResult> => {
+
+  return customFetch<CreateDraftsFromTemplateResult>(getCreateDraftsFromTemplateUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(
+      createDraftsFromTemplateInput,)
+  }
+);}
+
+
+
+
+export const getCreateDraftsFromTemplateMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDraftsFromTemplate>>, TError,{data: BodyType<CreateDraftsFromTemplateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createDraftsFromTemplate>>, TError,{data: BodyType<CreateDraftsFromTemplateInput>}, TContext> => {
+
+const mutationKey = ['createDraftsFromTemplate'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDraftsFromTemplate>>, {data: BodyType<CreateDraftsFromTemplateInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createDraftsFromTemplate(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDraftsFromTemplateMutationResult = NonNullable<Awaited<ReturnType<typeof createDraftsFromTemplate>>>
+    export type CreateDraftsFromTemplateMutationBody = BodyType<CreateDraftsFromTemplateInput>
+    export type CreateDraftsFromTemplateMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Create Gmail drafts from a template and CSV row data (no AI required)
+ */
+export const useCreateDraftsFromTemplate = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDraftsFromTemplate>>, TError,{data: BodyType<CreateDraftsFromTemplateInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createDraftsFromTemplate>>,
+        TError,
+        {data: BodyType<CreateDraftsFromTemplateInput>},
+        TContext
+      > => {
+      return useMutation(getCreateDraftsFromTemplateMutationOptions(options));
+    }
 
 export const getParseUploadedFileUrl = () => {
 

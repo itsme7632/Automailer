@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
-import { Zap, ArrowRight, Upload, Sparkles, Send, CheckCircle } from "lucide-react";
+import { Zap, ArrowRight, Upload, FileText, Send } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function Home() {
@@ -49,21 +49,21 @@ export default function Home() {
               transition={{ duration: 0.5 }}
             >
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-700 text-xs font-medium mb-8">
-                <Sparkles className="h-3.5 w-3.5" />
-                AI-Powered Vehicle Shipping Outreach
+                <Zap className="h-3.5 w-3.5" />
+                Gmail Draft Automation for Auto Transport
               </div>
 
               <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight mb-6 leading-[1.1] text-slate-900">
-                Turn lead sheets into
+                Upload a spreadsheet.
                 <br className="hidden md:block" />
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-violet-500">
-                  {" "}ready-to-send drafts.
+                  {" "}Create Gmail drafts instantly.
                 </span>
               </h1>
 
               <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed">
-                The outreach cockpit for auto transport brokers. Upload your CSV leads,
-                generate hyper-personalized emails with AI, and sync them directly to Gmail.
+                Write your own email template with dynamic variables, upload your leads CSV,
+                and Vertex Mailer creates personalized Gmail drafts — ready to review and send.
               </p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -143,31 +143,31 @@ export default function Home() {
             <div className="text-center mb-16">
               <h2 className="text-3xl font-bold text-slate-900 mb-3">How it works</h2>
               <p className="text-slate-500 max-w-xl mx-auto">
-                Stop copying and pasting templates. Build a scalable pipeline that sounds like you wrote every email by hand.
+                Paste your template, upload your spreadsheet, click create. Gmail drafts ready in 60 seconds.
               </p>
             </div>
 
             <div className="grid md:grid-cols-3 gap-6">
               {[
                 {
-                  icon: Upload,
+                  icon: FileText,
                   step: "01",
-                  title: "Upload your leads",
-                  desc: "Drop your CSV or XLSX file. We parse names, vehicles, routes, and pricing automatically.",
+                  title: "Write your template",
+                  desc: "Create an email with variables like {name}, {vehicle}, {pickup}. Any CSV column header becomes a variable.",
                   color: "bg-blue-50 text-blue-600",
                 },
                 {
-                  icon: Sparkles,
+                  icon: Upload,
                   step: "02",
-                  title: "Generate with AI",
-                  desc: "AI crafts highly specific, context-aware emails using your templates and preferred tone.",
+                  title: "Upload your leads",
+                  desc: "Drop your CSV or XLSX file. Columns are auto-detected and mapped to template variables instantly.",
                   color: "bg-violet-50 text-violet-600",
                 },
                 {
                   icon: Send,
                   step: "03",
-                  title: "Sync to Gmail",
-                  desc: "Review drafts right in your Gmail account. Hit send when you're ready to close the deal.",
+                  title: "Create Gmail drafts",
+                  desc: "Variables are replaced with spreadsheet data. Drafts land in your Gmail — never auto-sent.",
                   color: "bg-emerald-50 text-emerald-600",
                 },
               ].map((step, i) => (
@@ -200,10 +200,10 @@ export default function Home() {
               <Zap className="h-6 w-6 text-white" />
             </div>
             <h2 className="text-3xl font-bold text-slate-900 mb-4">
-              Ready to scale your outreach?
+              Ready to create drafts in 60 seconds?
             </h2>
             <p className="text-slate-500 mb-8 leading-relaxed">
-              Join brokers who are already using AI to send better, faster, more personal outreach.
+              Built for auto transport brokers. No AI subscription required — just your template and your spreadsheet.
             </p>
             <Button size="lg" className="h-12 px-10 rounded-xl shadow-md font-medium" asChild>
               <Link href="/register">Get started for free</Link>

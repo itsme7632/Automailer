@@ -644,7 +644,7 @@ export const GetDraftsResponse = zod.object({
   "data": zod.array(zod.object({
   "id": zod.number(),
   "campaignId": zod.number().nullish(),
-  "leadId": zod.number(),
+  "leadId": zod.number().optional(),
   "userId": zod.number(),
   "gmailDraftId": zod.string().nullish(),
   "subject": zod.string(),
@@ -669,7 +669,7 @@ export const GetDraftParams = zod.object({
 export const GetDraftResponse = zod.object({
   "id": zod.number(),
   "campaignId": zod.number().nullish(),
-  "leadId": zod.number(),
+  "leadId": zod.number().optional(),
   "userId": zod.number(),
   "gmailDraftId": zod.string().nullish(),
   "subject": zod.string(),
@@ -677,6 +677,28 @@ export const GetDraftResponse = zod.object({
   "status": zod.enum(['pending', 'success', 'failed']),
   "errorMessage": zod.string().nullish(),
   "createdAt": zod.string()
+})
+
+
+/**
+ * @summary Create Gmail drafts from a template and CSV row data (no AI required)
+ */
+export const CreateDraftsFromTemplateBody = zod.object({
+  "templateId": zod.number(),
+  "rows": zod.array(zod.record(zod.string(), zod.string()))
+})
+
+export const CreateDraftsFromTemplateResponse = zod.object({
+  "total": zod.number(),
+  "succeeded": zod.number(),
+  "failed": zod.number(),
+  "results": zod.array(zod.object({
+  "email": zod.string(),
+  "subject": zod.string(),
+  "status": zod.enum(['success', 'failed']),
+  "gmailDraftId": zod.string().optional(),
+  "error": zod.string().optional()
+}))
 })
 
 
@@ -697,6 +719,8 @@ export const ParseUploadedFileResponse = zod.object({
   "delivery": zod.string().nullish(),
   "price": zod.string().nullish(),
   "notes": zod.string().nullish(),
+  "company": zod.string().nullish(),
+  "phone": zod.string().nullish(),
   "hasValidEmail": zod.boolean(),
   "isDuplicate": zod.boolean()
 })),

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, draftsTable, usersTable } from "@workspace/db";
+import { db, draftsTable, usersTable, templatesTable, activityTable } from "@workspace/db";
 import { eq, and, count, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { GetDraftParams } from "@workspace/api-zod";
@@ -58,7 +58,6 @@ router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  // Re-fetch user to get the latest tokens (may have been refreshed since JWT was issued)
   const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
   if (!freshUser) { res.status(404).json({ error: "User not found" }); return; }
 
@@ -76,6 +75,104 @@ router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void
     req.log.warn({ err: err.message, to }, "Direct draft creation failed");
     res.status(502).json({ error: err.message ?? "Failed to create Gmail draft" });
   }
+});
+
+/**
+ * Core new workflow: create Gmail drafts from a saved template + CSV row data.
+ * Replaces {variable} placeholders in subject/body with row values.
+ * Does NOT require AI — purely variable substitution.
+ */
+router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const { templateId, rows } = req.body as {
+    templateId?: number;
+    rows?: Record<string, string>[];
+  };
+
+  if (!templateId || !Array.isArray(rows) || rows.length === 0) {
+    res.status(400).json({ error: "templateId and a non-empty rows[] are required" });
+    return;
+  }
+
+  const [template] = await db
+    .select()
+    .from(templatesTable)
+    .where(and(eq(templatesTable.id, templateId), eq(templatesTable.userId, user.id)));
+
+  if (!template) {
+    res.status(404).json({ error: "Template not found" });
+    return;
+  }
+
+  const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+
+  if (!freshUser?.gmailConnected || !freshUser.gmailAccessToken) {
+    res.status(400).json({
+      error: "Gmail not connected. Connect Gmail in Settings before creating drafts.",
+    });
+    return;
+  }
+
+  function replaceVars(text: string, row: Record<string, string>): string {
+    return text.replace(/\{([^}]+)\}/g, (match, key) => row[key.trim()] ?? match);
+  }
+
+  const results: {
+    email: string;
+    subject: string;
+    status: string;
+    gmailDraftId?: string;
+    error?: string;
+  }[] = [];
+  let succeeded = 0;
+  let failed = 0;
+
+  for (const row of rows) {
+    const email = row.email ?? "";
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      results.push({ email, subject: "", status: "failed", error: "Missing or invalid email" });
+      failed++;
+      continue;
+    }
+
+    const subject = replaceVars(template.subject, row);
+    const body = replaceVars(template.body, row);
+
+    try {
+      const gmailDraftId = await createGmailDraft(freshUser, email, subject, body);
+      await db.insert(draftsTable).values({
+        userId: user.id,
+        gmailDraftId,
+        subject,
+        body,
+        status: "success",
+      });
+      results.push({ email, subject, status: "success", gmailDraftId });
+      succeeded++;
+    } catch (err: any) {
+      const errMsg = String(err?.message ?? "Unknown error");
+      await db.insert(draftsTable).values({
+        userId: user.id,
+        subject,
+        body,
+        status: "failed",
+        errorMessage: errMsg,
+      });
+      results.push({ email, subject, status: "failed", error: errMsg });
+      failed++;
+    }
+  }
+
+  try {
+    await db.insert(activityTable).values({
+      userId: user.id,
+      type: "drafts_generated",
+      description: `Created ${succeeded} Gmail draft${succeeded !== 1 ? "s" : ""} from template "${template.name}"${failed > 0 ? ` (${failed} failed)` : ""}`,
+      metadata: { templateId, total: rows.length, succeeded, failed },
+    });
+  } catch { /* non-fatal */ }
+
+  res.json({ total: rows.length, succeeded, failed, results });
 });
 
 export default router;

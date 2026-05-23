@@ -30,7 +30,7 @@ const COLUMN_ALIASES: Record<string, string> = {
   "e_mail": "email",
   "mail": "email",
 
-  // Vehicle — broadest set possible
+  // Vehicle
   "vehicle": "vehicle",
   "vehicle type": "vehicle",
   "vehicle_type": "vehicle",
@@ -104,6 +104,20 @@ const COLUMN_ALIASES: Record<string, string> = {
   "total": "price",
   "fee": "price",
 
+  // Company
+  "company": "company",
+  "company name": "company",
+  "business": "company",
+  "broker": "company",
+  "broker name": "company",
+
+  // Phone
+  "phone": "phone",
+  "phone number": "phone",
+  "telephone": "phone",
+  "mobile": "phone",
+  "cell": "phone",
+
   // Notes
   "notes": "notes",
   "note": "notes",
@@ -118,9 +132,7 @@ const COLUMN_ALIASES: Record<string, string> = {
 
 function detectColumn(header: string): string | null {
   const lower = header.toLowerCase().trim();
-  // Direct match first
   if (COLUMN_ALIASES[lower]) return COLUMN_ALIASES[lower];
-  // Partial match — check if any alias key is contained in the header
   for (const [alias, field] of Object.entries(COLUMN_ALIASES)) {
     if (lower.includes(alias) || alias.includes(lower)) {
       return field;
@@ -133,6 +145,7 @@ function mapRow(headers: string[], row: Record<string, string>): Record<string, 
   const mapped: Record<string, string | null> = {
     name: null, email: null, vehicle: null, route: null,
     pickup: null, delivery: null, price: null, notes: null,
+    company: null, phone: null,
   };
   for (const header of headers) {
     const field = detectColumn(header);
@@ -142,6 +155,11 @@ function mapRow(headers: string[], row: Record<string, string>): Record<string, 
     }
   }
   return mapped;
+}
+
+/** Normalize a CSV header to a valid template variable name, e.g. "Transport Type" → "transport_type" */
+function normalizeKey(header: string): string {
+  return header.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
 }
 
 router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, res): Promise<void> => {
@@ -185,14 +203,25 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
     const hasValidEmail = !!(mapped.email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(mapped.email));
     const isDuplicate = hasValidEmail && seenEmails.has(mapped.email!.toLowerCase());
     if (hasValidEmail) seenEmails.add(mapped.email!.toLowerCase());
-    return { ...mapped, hasValidEmail, isDuplicate };
+
+    // Include all raw column values (normalized to snake_case) so ANY column is usable as {variable}
+    const rawFields: Record<string, string> = {};
+    for (const header of headers) {
+      const key = normalizeKey(header);
+      if (key && row[header]) {
+        rawFields[key] = String(row[header]).trim();
+      }
+    }
+
+    // Mapped standard fields take precedence over raw fields
+    const mergedRow: Record<string, string | null | boolean> = { ...rawFields, ...mapped, hasValidEmail, isDuplicate };
+    return mergedRow;
   });
 
   const validRows = parsedRows.filter(r => r.hasValidEmail && !r.isDuplicate).length;
   const invalidRows = parsedRows.filter(r => !r.hasValidEmail).length;
   const duplicateRows = parsedRows.filter(r => r.isDuplicate).length;
 
-  // Show detected column mappings for the UI
   const columnMappings: Record<string, string> = {};
   for (const h of headers) {
     const field = detectColumn(h);

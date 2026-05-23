@@ -9,7 +9,7 @@ export const draftsTable = pgTable("drafts", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   campaignId: integer("campaign_id").references(() => campaignsTable.id, { onDelete: "set null" }),
-  leadId: integer("lead_id").notNull().references(() => leadsTable.id, { onDelete: "cascade" }),
+  leadId: integer("lead_id").references(() => leadsTable.id, { onDelete: "set null" }),
   gmailDraftId: text("gmail_draft_id"),
   subject: text("subject").notNull(),
   body: text("body").notNull(),

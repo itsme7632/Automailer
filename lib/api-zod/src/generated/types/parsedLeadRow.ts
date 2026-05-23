@@ -23,6 +23,11 @@ export interface ParsedLeadRow {
   price?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  phone?: string | null;
   hasValidEmail: boolean;
   isDuplicate: boolean;
-}
+  [key: string]: unknown;
+ }

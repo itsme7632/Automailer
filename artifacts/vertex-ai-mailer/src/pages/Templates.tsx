@@ -23,8 +23,8 @@ export default function Templates() {
       {
         data: {
           name: newTemplateName,
-          subject: "Shipping Quote for your {vehicle}",
-          body: "Hi {name},\n\nI can get your {vehicle} shipped from {pickup} to {delivery} for {price}.\n\nLet me know if you want to proceed.\n\nBest,",
+          subject: "Shipping quote for your {vehicle}",
+          body: "Hi {name},\n\nI wanted to reach out about shipping your {vehicle} from {pickup} to {delivery}.\n\nWe can get it done for {price}. Let me know if you'd like to move forward.\n\nBest regards,",
         },
       },
       {
@@ -47,7 +47,12 @@ export default function Templates() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Email Templates</h1>
-          <p className="text-slate-500 mt-1 text-sm">Base templates that AI personalizes for each lead.</p>
+          <p className="text-slate-500 mt-1 text-sm">
+            Write templates with variables like <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded font-mono">{"{name}"}</code>,{" "}
+            <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded font-mono">{"{vehicle}"}</code>,{" "}
+            <code className="text-xs bg-slate-100 px-1.5 py-0.5 rounded font-mono">{"{pickup}"}</code>.
+            Any CSV column header works too.
+          </p>
         </div>
         <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
           <DialogTrigger asChild>
@@ -64,7 +69,7 @@ export default function Templates() {
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">Template Name</label>
                 <Input
-                  placeholder="e.g. Standard Cold Outreach"
+                  placeholder="e.g. Standard Outreach"
                   value={newTemplateName}
                   onChange={e => setNewTemplateName(e.target.value)}
                   onKeyDown={e => { if (e.key === "Enter") handleCreate(); }}
@@ -98,7 +103,7 @@ export default function Templates() {
           <div className="col-span-full flex flex-col items-center justify-center py-20 rounded-2xl border-2 border-dashed border-slate-200 bg-white text-slate-400">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
             <p className="font-medium text-slate-600 text-sm">No templates yet</p>
-            <p className="text-xs mt-1 mb-4">Create your first template to start generating drafts.</p>
+            <p className="text-xs mt-1 mb-4">Create your first template to start sending drafts.</p>
             <Button
               variant="outline"
               size="sm"
@@ -147,7 +152,7 @@ export default function Templates() {
                   className="text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50 rounded-lg h-7 px-2 gap-1"
                 >
                   <Link href={`/templates/${template.id}`}>
-                    Edit template <ArrowRight className="h-3 w-3" />
+                    Edit <ArrowRight className="h-3 w-3" />
                   </Link>
                 </Button>
               </div>

@@ -380,7 +380,7 @@ export interface DraftRecord {
   id: number;
   /** @nullable */
   campaignId?: number | null;
-  leadId: number;
+  leadId?: number;
   userId: number;
   /** @nullable */
   gmailDraftId?: string | null;
@@ -420,9 +420,14 @@ export interface ParsedLeadRow {
   price?: string | null;
   /** @nullable */
   notes?: string | null;
+  /** @nullable */
+  company?: string | null;
+  /** @nullable */
+  phone?: string | null;
   hasValidEmail: boolean;
   isDuplicate: boolean;
-}
+  [key: string]: unknown;
+ }
 
 export interface ParsedFileResult {
   rows: ParsedLeadRow[];
@@ -431,6 +436,36 @@ export interface ParsedFileResult {
   invalidRows: number;
   duplicateRows: number;
   detectedColumns: string[];
+}
+
+export type CreateDraftsFromTemplateInputRowsItem = {[key: string]: string};
+
+export interface CreateDraftsFromTemplateInput {
+  templateId: number;
+  rows: CreateDraftsFromTemplateInputRowsItem[];
+}
+
+export type DraftRowResultStatus = typeof DraftRowResultStatus[keyof typeof DraftRowResultStatus];
+
+
+export const DraftRowResultStatus = {
+  success: 'success',
+  failed: 'failed',
+} as const;
+
+export interface DraftRowResult {
+  email: string;
+  subject: string;
+  status: DraftRowResultStatus;
+  gmailDraftId?: string;
+  error?: string;
+}
+
+export interface CreateDraftsFromTemplateResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  results: DraftRowResult[];
 }
 
 export interface AdminStats {

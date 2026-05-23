@@ -2,7 +2,7 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard,
-  Sparkles,
+  FileText,
   UploadCloud,
   Mail,
   Settings,
@@ -25,10 +25,10 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard", exact: true },
-  { href: "/followups", icon: Sparkles, label: "AI Followups", exact: false },
-  { href: "/leads/import", icon: UploadCloud, label: "Upload Leads", exact: true },
-  { href: "/drafts", icon: Mail, label: "Gmail Drafts", exact: false },
+  { href: "/dashboard",    icon: LayoutDashboard, label: "Dashboard",     exact: true },
+  { href: "/templates",    icon: FileText,        label: "Templates",     exact: false },
+  { href: "/leads/import", icon: UploadCloud,     label: "Upload & Send", exact: true },
+  { href: "/drafts",       icon: Mail,            label: "Gmail Drafts",  exact: false },
 ];
 
 function NavItem({
