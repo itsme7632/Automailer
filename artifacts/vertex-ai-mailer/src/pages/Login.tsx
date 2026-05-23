@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -29,9 +29,20 @@ const GoogleIcon = () => (
 );
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // If already logged in, redirect based on role
+  if (user) {
+    if (user.role === "admin") {
+      setLocation("/admin/dashboard");
+    } else {
+      setLocation("/dashboard");
+    }
+    return null;
+  }
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -41,7 +52,12 @@ export default function Login() {
   const onSubmit = async (data: LoginFormValues) => {
     try {
       setIsSubmitting(true);
-      await login(data);
+      const loggedInUser = await login(data);
+      if (loggedInUser.role === "admin") {
+        setLocation("/admin/dashboard");
+      } else {
+        setLocation("/dashboard");
+      }
     } catch (err: any) {
       toast({
         variant: "destructive",

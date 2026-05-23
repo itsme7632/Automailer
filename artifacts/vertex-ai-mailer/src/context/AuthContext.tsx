@@ -6,8 +6,8 @@ import { useQueryClient } from "@tanstack/react-query";
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (data: LoginInput) => Promise<void>;
-  register: (data: RegisterInput) => Promise<void>;
+  login: (data: LoginInput) => Promise<User>;
+  register: (data: RegisterInput) => Promise<User>;
   logout: () => Promise<void>;
 }
 
@@ -38,16 +38,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  const login = async (data: LoginInput) => {
+  const login = async (data: LoginInput): Promise<User> => {
     const res = await apiLogin(data);
     setToken(res.token);
     queryClient.setQueryData(getGetMeQueryKey(), res.user);
+    return res.user as User;
   };
 
-  const register = async (data: RegisterInput) => {
+  const register = async (data: RegisterInput): Promise<User> => {
     const res = await apiRegister(data);
     setToken(res.token);
     queryClient.setQueryData(getGetMeQueryKey(), res.user);
+    return res.user as User;
   };
 
   const logout = async () => {
