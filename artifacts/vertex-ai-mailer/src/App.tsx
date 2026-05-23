@@ -11,6 +11,7 @@ import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
 import Dashboard from "@/pages/Dashboard";
+import Followups from "@/pages/Followups";
 import Campaigns from "@/pages/Campaigns";
 import CampaignDetail from "@/pages/CampaignDetail";
 import Leads from "@/pages/Leads";
@@ -38,84 +39,70 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/auth/callback" component={AuthCallback} />
-      
+
       <Route path="/dashboard">
         <ProtectedRoute>
-          <AppLayout>
-            <Dashboard />
-          </AppLayout>
+          <AppLayout><Dashboard /></AppLayout>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/followups">
+        <ProtectedRoute>
+          <AppLayout><Followups /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/campaigns">
         <ProtectedRoute>
-          <AppLayout>
-            <Campaigns />
-          </AppLayout>
+          <AppLayout><Campaigns /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/campaigns/:id">
         <ProtectedRoute>
-          <AppLayout>
-            <CampaignDetail />
-          </AppLayout>
+          <AppLayout><CampaignDetail /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/leads/import">
         <ProtectedRoute>
-          <AppLayout>
-            <LeadsImport />
-          </AppLayout>
+          <AppLayout><LeadsImport /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/leads">
         <ProtectedRoute>
-          <AppLayout>
-            <Leads />
-          </AppLayout>
+          <AppLayout><Leads /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/templates">
         <ProtectedRoute>
-          <AppLayout>
-            <Templates />
-          </AppLayout>
+          <AppLayout><Templates /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/templates/:id">
         <ProtectedRoute>
-          <AppLayout>
-            <TemplateEditor />
-          </AppLayout>
+          <AppLayout><TemplateEditor /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/drafts">
         <ProtectedRoute>
-          <AppLayout>
-            <Drafts />
-          </AppLayout>
+          <AppLayout><Drafts /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/settings">
         <ProtectedRoute>
-          <AppLayout>
-            <Settings />
-          </AppLayout>
+          <AppLayout><Settings /></AppLayout>
         </ProtectedRoute>
       </Route>
 
       <Route path="/admin">
         <ProtectedRoute>
-          <AppLayout>
-            <Admin />
-          </AppLayout>
+          <AppLayout><Admin /></AppLayout>
         </ProtectedRoute>
       </Route>
 

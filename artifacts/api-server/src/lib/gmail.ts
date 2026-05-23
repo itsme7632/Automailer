@@ -1,5 +1,7 @@
 import { google } from "googleapis";
+import { db, usersTable } from "@workspace/db";
 import type { User } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const OAUTH_CLIENT_ID = process.env.GMAIL_CLIENT_ID ?? "";
 const OAUTH_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? "";
@@ -7,9 +9,6 @@ const OAUTH_CLIENT_SECRET = process.env.GMAIL_CLIENT_SECRET ?? "";
 /**
  * The single redirect URI used for ALL OAuth flows (Google login + Gmail connect).
  * Must be registered in Google Cloud Console.
- *
- * In Replit production: https://<first-domain>/api/auth/callback
- * In dev: http://localhost:5000/api/auth/callback  (or override with OAUTH_REDIRECT_URI)
  */
 export function getOAuthRedirectUri(): string {
   if (process.env.OAUTH_REDIRECT_URI) {
@@ -27,10 +26,7 @@ export function getOAuth2Client() {
   return new google.auth.OAuth2(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, getOAuthRedirectUri());
 }
 
-/**
- * Generate the Google OAuth URL for SIGN-IN (basic profile scopes only).
- * State must be "google-login" so the callback knows which flow to handle.
- */
+/** Generate the Google OAuth URL for SIGN-IN (basic profile scopes only). */
 export function getGoogleAuthUrl(): string {
   const client = getOAuth2Client();
   return client.generateAuthUrl({
@@ -44,10 +40,7 @@ export function getGoogleAuthUrl(): string {
   });
 }
 
-/**
- * Generate the Gmail OAuth URL for connecting an existing account.
- * State encodes "gmail-connect:<userId>" so the callback saves tokens for the right user.
- */
+/** Generate the Gmail OAuth URL for connecting an existing account. */
 export function getGmailAuthUrl(userId: number): string {
   const client = getOAuth2Client();
   return client.generateAuthUrl({
@@ -69,6 +62,11 @@ export async function exchangeCode(code: string) {
   return tokens;
 }
 
+/**
+ * Build an authenticated Gmail client for `user`.
+ * Automatically refreshes the access token if expired and persists the new
+ * token back to the database so the next request also works.
+ */
 export async function getGmailClient(user: User) {
   const client = getOAuth2Client();
   client.setCredentials({
@@ -76,40 +74,93 @@ export async function getGmailClient(user: User) {
     refresh_token: user.gmailRefreshToken,
     expiry_date: user.gmailTokenExpiry?.getTime(),
   });
+
+  // Persist refreshed tokens automatically — googleapis fires this event
+  // whenever the library silently refreshes an expired access token.
+  client.on("tokens", (tokens) => {
+    db.update(usersTable)
+      .set({
+        gmailAccessToken: tokens.access_token ?? user.gmailAccessToken,
+        ...(tokens.refresh_token ? { gmailRefreshToken: tokens.refresh_token } : {}),
+        gmailTokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(usersTable.id, user.id))
+      .catch(() => {
+        // Non-fatal — token refresh still succeeds for this request
+      });
+  });
+
   return google.gmail({ version: "v1", auth: client });
 }
 
+/**
+ * Create a Gmail draft for `to` from the authenticated `user`.
+ * Returns the Gmail draft ID or throws a descriptive error.
+ */
 export async function createGmailDraft(
   user: User,
   to: string,
   subject: string,
   body: string
 ): Promise<string> {
+  if (!user.gmailAccessToken) {
+    throw new Error("Gmail not connected — please reconnect Gmail in Settings.");
+  }
+  if (!user.gmailRefreshToken) {
+    throw new Error(
+      "Gmail refresh token missing — please reconnect Gmail in Settings (click Reconnect)."
+    );
+  }
+
   const gmail = await getGmailClient(user);
 
-  const message = [
+  // Build a valid RFC 2822 message. Use CRLF line endings as required.
+  const subjectEncoded = `=?UTF-8?B?${Buffer.from(subject, "utf-8").toString("base64")}?=`;
+  const rawMessage = [
     `To: ${to}`,
-    `Subject: ${subject}`,
-    "Content-Type: text/plain; charset=utf-8",
+    `Subject: ${subjectEncoded}`,
     "MIME-Version: 1.0",
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: quoted-printable",
     "",
     body,
-  ].join("\n");
+  ].join("\r\n");
 
-  const encoded = Buffer.from(message)
+  const encoded = Buffer.from(rawMessage)
     .toString("base64")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 
-  const draft = await gmail.users.drafts.create({
-    userId: "me",
-    requestBody: {
-      message: { raw: encoded },
-    },
-  });
+  try {
+    const draft = await gmail.users.drafts.create({
+      userId: "me",
+      requestBody: {
+        message: { raw: encoded },
+      },
+    });
+    return draft.data.id ?? "";
+  } catch (err: any) {
+    // Translate Google API error codes into human-readable messages
+    const status = err?.response?.status ?? err?.status;
+    const reason = err?.response?.data?.error?.message ?? err?.message ?? String(err);
 
-  return draft.data.id ?? "";
+    if (status === 401) {
+      throw new Error(
+        "Gmail authentication expired — please reconnect Gmail in Settings."
+      );
+    }
+    if (status === 403) {
+      throw new Error(
+        `Gmail permission denied — make sure the Gmail Compose scope was granted. Detail: ${reason}`
+      );
+    }
+    if (status === 429) {
+      throw new Error("Gmail API rate limit reached — please try again in a few minutes.");
+    }
+    throw new Error(`Gmail API error (${status ?? "unknown"}): ${reason}`);
+  }
 }
 
 export async function getOAuthUserInfo(accessToken: string) {

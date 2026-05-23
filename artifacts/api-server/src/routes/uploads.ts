@@ -7,20 +7,126 @@ import { requireAuth } from "../lib/auth";
 const router: IRouter = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
+// Extended column aliases — covers common vehicle shipping CSV formats
 const COLUMN_ALIASES: Record<string, string> = {
-  "name": "name", "full name": "name", "contact name": "name", "first name": "name",
-  "email": "email", "email address": "email", "e-mail": "email",
-  "vehicle": "vehicle", "car": "vehicle", "auto": "vehicle", "make": "vehicle", "model": "vehicle",
-  "route": "route", "shipping route": "route",
-  "pickup": "pickup", "origin": "pickup", "from": "pickup", "pickup location": "pickup",
-  "delivery": "delivery", "destination": "delivery", "to": "delivery", "delivery location": "delivery",
-  "price": "price", "rate": "price", "cost": "price", "quote": "price", "amount": "price",
-  "notes": "notes", "note": "notes", "comments": "notes", "additional info": "notes",
+  // Name
+  "name": "name",
+  "full name": "name",
+  "fullname": "name",
+  "contact name": "name",
+  "contact": "name",
+  "first name": "name",
+  "firstname": "name",
+  "customer name": "name",
+  "client name": "name",
+  "customer": "name",
+  "client": "name",
+
+  // Email
+  "email": "email",
+  "email address": "email",
+  "emailaddress": "email",
+  "e-mail": "email",
+  "e_mail": "email",
+  "mail": "email",
+
+  // Vehicle — broadest set possible
+  "vehicle": "vehicle",
+  "vehicle type": "vehicle",
+  "vehicle_type": "vehicle",
+  "vehicletype": "vehicle",
+  "car": "vehicle",
+  "car type": "vehicle",
+  "car_type": "vehicle",
+  "auto": "vehicle",
+  "automobile": "vehicle",
+  "make": "vehicle",
+  "model": "vehicle",
+  "make/model": "vehicle",
+  "make_model": "vehicle",
+  "makemodel": "vehicle",
+  "year make model": "vehicle",
+  "year_make_model": "vehicle",
+  "transport vehicle": "vehicle",
+  "transport_vehicle": "vehicle",
+  "transportvehicle": "vehicle",
+  "vehicle description": "vehicle",
+  "vehicle_description": "vehicle",
+  "yr/make/model": "vehicle",
+  "ymm": "vehicle",
+
+  // Route
+  "route": "route",
+  "shipping route": "route",
+  "shipping_route": "route",
+
+  // Pickup
+  "pickup": "pickup",
+  "pick up": "pickup",
+  "pick_up": "pickup",
+  "origin": "pickup",
+  "from": "pickup",
+  "from location": "pickup",
+  "from_location": "pickup",
+  "pickup location": "pickup",
+  "pickup_location": "pickup",
+  "shipping from": "pickup",
+  "ship from": "pickup",
+  "shipper city": "pickup",
+  "pickup city": "pickup",
+  "origin city": "pickup",
+
+  // Delivery
+  "delivery": "delivery",
+  "destination": "delivery",
+  "to": "delivery",
+  "to location": "delivery",
+  "to_location": "delivery",
+  "delivery location": "delivery",
+  "delivery_location": "delivery",
+  "shipping to": "delivery",
+  "ship to": "delivery",
+  "consignee city": "delivery",
+  "delivery city": "delivery",
+  "destination city": "delivery",
+
+  // Price
+  "price": "price",
+  "rate": "price",
+  "cost": "price",
+  "quote": "price",
+  "amount": "price",
+  "shipping cost": "price",
+  "shipping_cost": "price",
+  "shipping rate": "price",
+  "shipping_rate": "price",
+  "transport cost": "price",
+  "total": "price",
+  "fee": "price",
+
+  // Notes
+  "notes": "notes",
+  "note": "notes",
+  "comments": "notes",
+  "comment": "notes",
+  "additional info": "notes",
+  "additional_info": "notes",
+  "remarks": "notes",
+  "details": "notes",
+  "extra": "notes",
 };
 
 function detectColumn(header: string): string | null {
   const lower = header.toLowerCase().trim();
-  return COLUMN_ALIASES[lower] ?? null;
+  // Direct match first
+  if (COLUMN_ALIASES[lower]) return COLUMN_ALIASES[lower];
+  // Partial match — check if any alias key is contained in the header
+  for (const [alias, field] of Object.entries(COLUMN_ALIASES)) {
+    if (lower.includes(alias) || alias.includes(lower)) {
+      return field;
+    }
+  }
+  return null;
 }
 
 function mapRow(headers: string[], row: Record<string, string>): Record<string, string | null> {
@@ -30,8 +136,9 @@ function mapRow(headers: string[], row: Record<string, string>): Record<string, 
   };
   for (const header of headers) {
     const field = detectColumn(header);
-    if (field && row[header]) {
-      mapped[field] = row[header];
+    if (field && row[header] && !mapped[field]) {
+      const val = String(row[header]).trim();
+      if (val) mapped[field] = val;
     }
   }
   return mapped;
@@ -50,7 +157,11 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
   try {
     if (filename.endsWith(".csv")) {
       const text = req.file.buffer.toString("utf-8");
-      const result = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true });
+      const result = Papa.parse<Record<string, string>>(text, {
+        header: true,
+        skipEmptyLines: true,
+        transformHeader: (h) => h.trim(),
+      });
       headers = result.meta.fields ?? [];
       rows = result.data;
     } else if (filename.endsWith(".xlsx") || filename.endsWith(".xls")) {
@@ -63,8 +174,8 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
       res.status(400).json({ error: "Unsupported file format. Please upload CSV or XLSX." });
       return;
     }
-  } catch (err) {
-    res.status(400).json({ error: "Failed to parse file" });
+  } catch {
+    res.status(400).json({ error: "Failed to parse file. Make sure it is a valid CSV or XLSX." });
     return;
   }
 
@@ -80,7 +191,15 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
   const validRows = parsedRows.filter(r => r.hasValidEmail && !r.isDuplicate).length;
   const invalidRows = parsedRows.filter(r => !r.hasValidEmail).length;
   const duplicateRows = parsedRows.filter(r => r.isDuplicate).length;
-  const detectedColumns = headers.map(h => detectColumn(h)).filter(Boolean) as string[];
+
+  // Show detected column mappings for the UI
+  const columnMappings: Record<string, string> = {};
+  for (const h of headers) {
+    const field = detectColumn(h);
+    if (field) columnMappings[h] = field;
+  }
+  const detectedColumns = [...new Set(Object.values(columnMappings))];
+  const unmappedColumns = headers.filter(h => !columnMappings[h]);
 
   res.json({
     rows: parsedRows,
@@ -88,7 +207,10 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
     validRows,
     invalidRows,
     duplicateRows,
-    detectedColumns: [...new Set(detectedColumns)],
+    detectedColumns,
+    columnMappings,
+    unmappedColumns,
+    headers,
   });
 });
 

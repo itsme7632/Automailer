@@ -433,6 +433,10 @@ importers:
         version: 3.25.76
 
   artifacts/vertex-ai-mailer:
+    dependencies:
+      papaparse:
+        specifier: ^5.5.3
+        version: 5.5.3
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0
@@ -539,6 +543,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 25.6.2
+      '@types/papaparse':
+        specifier: ^5.5.2
+        version: 5.5.2
       '@types/react':
         specifier: 'catalog:'
         version: 19.2.14

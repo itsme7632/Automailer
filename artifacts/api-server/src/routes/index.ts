@@ -10,6 +10,7 @@ import aiRouter from "./ai";
 import draftsRouter from "./drafts";
 import uploadsRouter from "./uploads";
 import adminRouter from "./admin";
+import diagnosticsRouter from "./diagnostics";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(aiRouter);
 router.use(draftsRouter);
 router.use(uploadsRouter);
 router.use(adminRouter);
+router.use(diagnosticsRouter);
 
 export default router;

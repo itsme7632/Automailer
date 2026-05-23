@@ -2,15 +2,16 @@ import { Link, useLocation } from "wouter";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard,
+  Sparkles,
+  UploadCloud,
   Mail,
-  Users,
-  FileText,
-  Send,
   Settings,
   ShieldAlert,
   LogOut,
   Zap,
   ChevronUp,
+  Menu,
+  X,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -22,15 +23,12 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import { Menu, X } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard", exact: true },
-  { href: "/campaigns", icon: Mail, label: "Campaigns" },
-  { href: "/leads", icon: Users, label: "Leads" },
-  { href: "/templates", icon: FileText, label: "Templates" },
-  { href: "/drafts", icon: Send, label: "Drafts" },
+  { href: "/followups", icon: Sparkles, label: "AI Followups", exact: false },
+  { href: "/leads/import", icon: UploadCloud, label: "Upload Leads", exact: true },
+  { href: "/drafts", icon: Mail, label: "Gmail Drafts", exact: false },
 ];
 
 function NavItem({
@@ -71,7 +69,6 @@ function NavItem({
 
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const { user, logout } = useAuth();
-  const [location] = useLocation();
 
   if (!user) return null;
 

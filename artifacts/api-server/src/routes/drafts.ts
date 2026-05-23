@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
-import { db, draftsTable } from "@workspace/db";
+import { db, draftsTable, usersTable } from "@workspace/db";
 import { eq, and, count, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { GetDraftParams } from "@workspace/api-zod";
+import { createGmailDraft } from "../lib/gmail";
 
 const router: IRouter = Router();
 
@@ -38,6 +39,43 @@ router.get("/drafts/:id", requireAuth, async (req, res): Promise<void> => {
     .where(and(eq(draftsTable.id, params.data.id), eq(draftsTable.userId, user.id)));
   if (!draft) { res.status(404).json({ error: "Draft not found" }); return; }
   res.json({ ...draft, createdAt: draft.createdAt.toISOString() });
+});
+
+/**
+ * Direct draft creation — used by the AI Followups workflow.
+ * Creates a Gmail draft from raw to/subject/body without needing a lead record.
+ */
+router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+
+  const { to, subject, body } = req.body as { to?: string; subject?: string; body?: string };
+  if (!to || !subject || !body) {
+    res.status(400).json({ error: "to, subject, and body are required" });
+    return;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    res.status(400).json({ error: "Invalid email address" });
+    return;
+  }
+
+  // Re-fetch user to get the latest tokens (may have been refreshed since JWT was issued)
+  const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+  if (!freshUser) { res.status(404).json({ error: "User not found" }); return; }
+
+  if (!freshUser.gmailConnected || !freshUser.gmailAccessToken) {
+    res.status(400).json({
+      error: "Gmail not connected. Please connect Gmail in Settings before creating drafts.",
+    });
+    return;
+  }
+
+  try {
+    const gmailDraftId = await createGmailDraft(freshUser, to, subject, body);
+    res.status(201).json({ gmailDraftId, to, subject });
+  } catch (err: any) {
+    req.log.warn({ err: err.message, to }, "Direct draft creation failed");
+    res.status(502).json({ error: err.message ?? "Failed to create Gmail draft" });
+  }
 });
 
 export default router;
