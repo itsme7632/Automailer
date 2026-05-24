@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db, draftsTable, usersTable, templatesTable, activityTable } from "@workspace/db";
-import { eq, and, count, desc } from "drizzle-orm";
+import { db, draftsTable, usersTable, templatesTable, activityTable, emailTrackingEventsTable } from "@workspace/db";
+import { eq, and, count, desc, inArray } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { GetDraftParams } from "@workspace/api-zod";
 import { createGmailDraft } from "../lib/gmail";
@@ -12,14 +12,10 @@ import {
   type BrandingSettings,
 } from "../lib/email-html";
 import type { User } from "@workspace/db";
+import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
 
-/**
- * Extract BrandingSettings from a DB user row.
- * This is passed SEPARATELY to buildHtmlEmail — it is NOT merged into the lead row.
- * The template body only receives lead-specific vars ({name}, {vehicle}, etc.).
- */
 function userBranding(user: User): BrandingSettings {
   return {
     companyName:    user.companyName    ?? null,
@@ -35,6 +31,42 @@ function validStyle(s?: string): EmailStyle {
   return (["clean", "modern", "minimal", "luxury"] as const).includes(s as EmailStyle)
     ? (s as EmailStyle)
     : "clean";
+}
+
+function injectTracking(html: string, trackingId: string, baseUrl: string): string {
+  const pixel = `<img src="${baseUrl}/api/track/open/${trackingId}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0;" />`;
+  const tracked = html.replace(
+    /(<a\s[^>]*href=["'])(https?:\/\/[^"']+)(["'])/gi,
+    (_match, pre, url, post) => {
+      const encoded = encodeURIComponent(url);
+      return `${pre}${baseUrl}/api/track/click/${trackingId}?url=${encoded}${post}`;
+    }
+  );
+  return tracked.replace(/<\/body>/i, `${pixel}</body>`);
+}
+
+async function getTrackingStats(
+  draftIds: number[]
+): Promise<Record<number, { opens: number; clicks: number }>> {
+  if (draftIds.length === 0) return {};
+  const events = await db
+    .select({
+      draftId: emailTrackingEventsTable.draftId,
+      eventType: emailTrackingEventsTable.eventType,
+      cnt: count(),
+    })
+    .from(emailTrackingEventsTable)
+    .where(inArray(emailTrackingEventsTable.draftId, draftIds))
+    .groupBy(emailTrackingEventsTable.draftId, emailTrackingEventsTable.eventType);
+
+  const stats: Record<number, { opens: number; clicks: number }> = {};
+  for (const e of events) {
+    if (!e.draftId) continue;
+    if (!stats[e.draftId]) stats[e.draftId] = { opens: 0, clicks: 0 };
+    if (e.eventType === "open") stats[e.draftId].opens = e.cnt;
+    if (e.eventType === "click") stats[e.draftId].clicks = e.cnt;
+  }
+  return stats;
 }
 
 // ─── List / get drafts ────────────────────────────────────────────────────────
@@ -63,8 +95,15 @@ router.get("/drafts", requireAuth, async (req, res): Promise<void> => {
     .limit(limit)
     .offset((page - 1) * limit);
 
+  const stats = await getTrackingStats(drafts.map(d => d.id));
+
   res.json({
-    data: drafts.map(d => ({ ...d, createdAt: d.createdAt.toISOString() })),
+    data: drafts.map(d => ({
+      ...d,
+      createdAt: d.createdAt.toISOString(),
+      opens: stats[d.id]?.opens ?? 0,
+      clicks: stats[d.id]?.clicks ?? 0,
+    })),
     total: totalResult.count,
     page,
     limit,
@@ -119,17 +158,8 @@ router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void
   }
 });
 
-// ─── Preview — same rendering pipeline as actual draft ────────────────────────
+// ─── Preview ──────────────────────────────────────────────────────────────────
 
-/**
- * POST /api/drafts/preview
- *
- * Returns the exact HTML that would be placed inside a Gmail draft.
- * Used by LeadsImport to show a live preview before creating drafts.
- *
- * Pipeline is IDENTICAL to /drafts/from-template — any difference between
- * preview and draft is a bug.
- */
 router.post("/drafts/preview", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
   const { templateId, row, style, useSignatureBuilder } = req.body as {
@@ -164,19 +194,8 @@ router.post("/drafts/preview", requireAuth, async (req, res): Promise<void> => {
   res.json({ html, subject });
 });
 
-// ─── Batch from template — core workflow ─────────────────────────────────────
+// ─── Batch from template ─────────────────────────────────────────────────────
 
-/**
- * POST /api/drafts/from-template
- *
- * Creates HTML Gmail drafts from a saved template + CSV row data.
- *
- * Branding (header company name, optional signature) is applied automatically
- * from the user's Settings → Branding — templates do NOT need company variables.
- * Lead vars ({name}, {vehicle}, {pickup}, {delivery}, {price}, {route}) come from CSV rows.
- *
- * Never auto-sends — all creation uses gmail.users.drafts.create.
- */
 router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
   const { templateId, rows, style, useSignatureBuilder } = req.body as {
@@ -207,9 +226,9 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  // Branding is loaded once and passed to every email — it never goes into the row
   const branding   = userBranding(freshUser);
   const buildOpts  = { style: emailStyle, useSignatureBuilder: useSignatureBuilder ?? false };
+  const baseUrl    = `${req.protocol}://${req.get("host")}`;
 
   const results: {
     email: string; subject: string; status: string; gmailDraftId?: string; error?: string;
@@ -225,7 +244,6 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
       continue;
     }
 
-    // Lead row — format price if present; DO NOT merge company branding into row
     const row: Record<string, string> = { ...rawRow };
     if (row.price) row.price = formatPrice(row.price);
 
@@ -233,14 +251,18 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
     const bodyText = replaceVarsText(template.body, row);
     const bodyHtml = buildHtmlEmail(template.body, row, branding, buildOpts);
 
+    const trackingId = randomUUID();
+    const trackedHtml = injectTracking(bodyHtml, trackingId, baseUrl);
+
     try {
-      const gmailDraftId = await createGmailDraft(freshUser, email, subject, bodyText, bodyHtml);
+      const gmailDraftId = await createGmailDraft(freshUser, email, subject, bodyText, trackedHtml);
       await db.insert(draftsTable).values({
         userId: user.id,
         gmailDraftId,
         subject,
         body: bodyText,
         status: "success",
+        trackingId,
       });
       results.push({ email, subject, status: "success", gmailDraftId });
       succeeded++;
@@ -252,6 +274,7 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
         body: bodyText,
         status: "failed",
         errorMessage: errMsg,
+        trackingId,
       });
       results.push({ email, subject, status: "failed", error: errMsg });
       failed++;
@@ -267,7 +290,7 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
       }`,
       metadata: { templateId, total: rows.length, succeeded, failed, style: emailStyle },
     });
-  } catch { /* non-fatal */ }
+  } catch { }
 
   res.json({ total: rows.length, succeeded, failed, results });
 });

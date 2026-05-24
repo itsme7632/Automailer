@@ -4,11 +4,23 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Link } from "wouter";
-import { UploadCloud } from "lucide-react";
+import { UploadCloud, Eye, MousePointerClick } from "lucide-react";
+
+type DraftWithTracking = {
+  id: number;
+  subject: string;
+  status: string;
+  errorMessage?: string | null;
+  createdAt: string;
+  opens: number;
+  clicks: number;
+};
 
 export default function Drafts() {
   const [page, setPage] = useState(1);
   const { data, isLoading } = useGetDrafts({ page, limit: 20 });
+
+  const drafts = (data?.data ?? []) as unknown as DraftWithTracking[];
 
   return (
     <div className="space-y-6">
@@ -31,6 +43,12 @@ export default function Drafts() {
             <TableRow className="bg-slate-50/70">
               <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide">Status</TableHead>
               <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide">Subject</TableHead>
+              <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide text-center">
+                <span className="flex items-center justify-center gap-1"><Eye className="h-3.5 w-3.5" /> Opens</span>
+              </TableHead>
+              <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide text-center">
+                <span className="flex items-center justify-center gap-1"><MousePointerClick className="h-3.5 w-3.5" /> Clicks</span>
+              </TableHead>
               <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide">Created</TableHead>
             </TableRow>
           </TableHeader>
@@ -40,12 +58,14 @@ export default function Drafts() {
                 <TableRow key={i}>
                   <TableCell><Skeleton className="h-4 w-16" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-64" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-8 mx-auto" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-24" /></TableCell>
                 </TableRow>
               ))
-            ) : data?.data?.length === 0 ? (
+            ) : drafts.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={3} className="text-center h-40 text-slate-400">
+                <TableCell colSpan={5} className="text-center h-40 text-slate-400">
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-sm">No drafts created yet.</p>
                     <Button asChild variant="outline" size="sm" className="rounded-xl gap-1.5">
@@ -57,7 +77,7 @@ export default function Drafts() {
                 </TableCell>
               </TableRow>
             ) : (
-              data?.data?.map(draft => (
+              drafts.map(draft => (
                 <TableRow key={draft.id} className="hover:bg-slate-50/60">
                   <TableCell>
                     <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
@@ -72,6 +92,24 @@ export default function Drafts() {
                     <div className="font-medium text-slate-900 truncate max-w-md text-sm">{draft.subject}</div>
                     {draft.errorMessage && (
                       <div className="text-xs text-red-500 mt-0.5">{draft.errorMessage}</div>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {draft.opens > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 text-xs font-medium">
+                        <Eye className="h-3 w-3" />{draft.opens}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {draft.clicks > 0 ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 text-xs font-medium">
+                        <MousePointerClick className="h-3 w-3" />{draft.clicks}
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
                     )}
                   </TableCell>
                   <TableCell className="text-slate-500 text-sm">{new Date(draft.createdAt).toLocaleDateString()}</TableCell>

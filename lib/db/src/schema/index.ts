@@ -4,3 +4,4 @@ export * from "./leads";
 export * from "./templates";
 export * from "./drafts";
 export * from "./activity";
+export * from "./email_tracking";

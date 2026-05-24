@@ -1,7 +1,7 @@
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -30,9 +30,15 @@ const GoogleIcon = () => (
 );
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, user } = useAuth();
   const { toast } = useToast();
+  const [, setLocation] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  if (user) {
+    setLocation(user.role === "admin" ? "/admin/dashboard" : "/dashboard");
+    return null;
+  }
 
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -42,7 +48,12 @@ export default function Register() {
   const onSubmit = async (data: RegisterFormValues) => {
     try {
       setIsSubmitting(true);
-      await register(data);
+      const newUser = await register(data);
+      toast({
+        title: "Account created!",
+        description: "Welcome to Vertex Mailer. Let's get started.",
+      });
+      setLocation(newUser.role === "admin" ? "/admin/dashboard" : "/dashboard");
     } catch (err: any) {
       toast({
         variant: "destructive",

@@ -15,6 +15,7 @@ export const draftsTable = pgTable("drafts", {
   body: text("body").notNull(),
   status: text("status").notNull().default("pending"),
   errorMessage: text("error_message"),
+  trackingId: text("tracking_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
