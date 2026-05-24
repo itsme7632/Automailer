@@ -10,6 +10,7 @@ router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
   const [row] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
   res.json({
     companyName:    row?.companyName    ?? "",
+    companyTagline: row?.companyTagline ?? "",
     companyWebsite: row?.companyWebsite ?? "",
     companyPhone:   row?.companyPhone   ?? "",
     usdot:          row?.usdot          ?? "",
@@ -21,18 +22,29 @@ router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
 
 router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { companyName, companyWebsite, companyPhone, usdot, mcNumber, accentColor, useSignature } = req.body as {
-    companyName?: string;
+  const {
+    companyName,
+    companyTagline,
+    companyWebsite,
+    companyPhone,
+    usdot,
+    mcNumber,
+    accentColor,
+    useSignature,
+  } = req.body as {
+    companyName?:    string;
+    companyTagline?: string;
     companyWebsite?: string;
-    companyPhone?: string;
-    usdot?: string;
-    mcNumber?: string;
-    accentColor?: string;
-    useSignature?: boolean;
+    companyPhone?:   string;
+    usdot?:          string;
+    mcNumber?:       string;
+    accentColor?:    string;
+    useSignature?:   boolean;
   };
 
   await db.update(usersTable).set({
     companyName:    companyName?.trim()    || null,
+    companyTagline: companyTagline?.trim() || null,
     companyWebsite: companyWebsite?.trim() || null,
     companyPhone:   companyPhone?.trim()   || null,
     usdot:          usdot?.trim()          || null,

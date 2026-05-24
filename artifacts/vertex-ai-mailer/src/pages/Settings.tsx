@@ -20,7 +20,7 @@ interface DiagnosticsResult {
 }
 
 interface BrandingData {
-  companyName: string; companyWebsite: string; companyPhone: string;
+  companyName: string; companyTagline: string; companyWebsite: string; companyPhone: string;
   usdot: string; mcNumber: string; accentColor: string; useSignature: boolean;
 }
 
@@ -61,7 +61,7 @@ export default function Settings() {
 
   // Branding
   const [branding, setBranding] = useState<BrandingData>({
-    companyName: "", companyWebsite: "", companyPhone: "",
+    companyName: "", companyTagline: "", companyWebsite: "", companyPhone: "",
     usdot: "", mcNumber: "", accentColor: "", useSignature: false,
   });
   const [isSavingBranding, setIsSavingBranding] = useState(false);
@@ -172,6 +172,17 @@ export default function Settings() {
                   value={branding.companyName}
                   onChange={e => setBranding(b => ({ ...b, companyName: e.target.value }))}
                   placeholder="e.g. NSLA Carship"
+                  className="rounded-xl"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium flex items-center gap-1.5">
+                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" /> Company Tagline / Slogan
+                </label>
+                <Input
+                  value={branding.companyTagline}
+                  onChange={e => setBranding(b => ({ ...b, companyTagline: e.target.value }))}
+                  placeholder="e.g. Nationwide Vehicle Shipping"
                   className="rounded-xl"
                 />
               </div>

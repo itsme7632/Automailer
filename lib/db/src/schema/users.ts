@@ -19,6 +19,7 @@ export const usersTable = pgTable("users", {
   aiTone: text("ai_tone").default("professional"),
   // ── Company branding ─────────────────────────────────────────────────────
   companyName: text("company_name"),
+  companyTagline: text("company_tagline"),
   companyWebsite: text("company_website"),
   companyPhone: text("company_phone"),
   usdot: text("usdot"),

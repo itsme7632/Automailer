@@ -7,7 +7,7 @@
  *  - Templates NEVER contain company name or contact info as row variables
  *  - Signature is NEVER injected unless useSignatureBuilder === true
  *  - Zero hardcoded company names, taglines, or platform text anywhere
- *  - Table layout, inline CSS only, Arial/Helvetica — Gmail + Outlook + mobile safe
+ *  - Table layout, inline CSS + media queries — Gmail mobile / Outlook / Apple Mail safe
  */
 
 export type EmailStyle = "clean" | "modern" | "minimal" | "luxury";
@@ -15,6 +15,7 @@ export type EmailStyle = "clean" | "modern" | "minimal" | "luxury";
 /** User's company settings — drives header and optional signature automatically */
 export interface BrandingSettings {
   companyName?:    string | null;
+  companyTagline?: string | null;
   companyPhone?:   string | null;
   companyWebsite?: string | null;
   usdot?:          string | null;
@@ -72,7 +73,6 @@ function replaceVarsHtml(text: string, row: Record<string, string>): string {
     const k = key.trim();
     const raw = row[k];
     if (raw == null) {
-      // Leave unresolved vars invisible rather than showing a red error in real emails
       return `<span style="color:#ef4444;font-style:italic;">${match}</span>`;
     }
     const val = k === "price" ? formatPrice(raw) : raw;
@@ -89,11 +89,42 @@ function textToHtmlParagraphs(text: string, fontFamily: string, color: string): 
     .split(/\n\n+/)
     .filter(p => p.trim())
     .map(para =>
-      `<p style="margin:0 0 16px;font-family:${fontFamily};color:${color};font-size:15px;line-height:1.75;">${
+      `<p class="em-p" style="margin:0 0 16px;font-family:${fontFamily};color:${color};font-size:15px;line-height:1.75;">${
         para.trim().replace(/\n/g, "<br>")
       }</p>`
     )
     .join("");
+}
+
+/**
+ * Shared <head> block with reset CSS and responsive media queries.
+ * The .em-* classes are overridden on small screens.
+ */
+function sharedHead(extraCss = ""): string {
+  return `<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<title></title>
+<style type="text/css">
+/* Client reset */
+body,table,td,p,a,li{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;border-collapse:collapse;}
+img{-ms-interpolation-mode:bicubic;border:0;height:auto;outline:none;text-decoration:none;}
+body{margin:0!important;padding:0!important;width:100%!important;}
+/* Mobile overrides — supported by modern Gmail, Apple Mail, Samsung Mail */
+@media only screen and (max-width:600px){
+  .em-wrapper{padding:0!important;}
+  .em-wrapper-td{padding:12px 0!important;}
+  .em-card{width:100%!important;max-width:100%!important;}
+  .em-hdr{padding:20px 20px!important;}
+  .em-body{padding:28px 20px 28px!important;}
+  .em-co{font-size:18px!important;line-height:1.3!important;}
+  .em-tag{font-size:11px!important;}
+  .em-p{font-size:14px!important;line-height:1.7!important;}
+  .em-sig{padding:16px 20px!important;}
+}
+${extraCss}
+</style>`;
 }
 
 /**
@@ -108,12 +139,12 @@ function buildSignatureHtml(
   borderColor: string,
   fontFamily: string
 ): string {
-  const name    = agentName?.trim()                   ? escapeHtml(agentName.trim())                   : "";
-  const company = branding.companyName?.trim()         ? escapeHtml(branding.companyName.trim())         : "";
-  const phone   = branding.companyPhone?.trim()        ? escapeHtml(branding.companyPhone.trim())        : "";
-  const website = branding.companyWebsite?.trim()      ? escapeHtml(branding.companyWebsite.trim())      : "";
-  const usdot   = branding.usdot?.trim()               ? escapeHtml(branding.usdot.trim())               : "";
-  const mc      = branding.mcNumber?.trim()            ? escapeHtml(branding.mcNumber.trim())            : "";
+  const name    = agentName?.trim()              ? escapeHtml(agentName.trim())              : "";
+  const company = branding.companyName?.trim()   ? escapeHtml(branding.companyName.trim())   : "";
+  const phone   = branding.companyPhone?.trim()  ? escapeHtml(branding.companyPhone.trim())  : "";
+  const website = branding.companyWebsite?.trim()? escapeHtml(branding.companyWebsite.trim()): "";
+  const usdot   = branding.usdot?.trim()         ? escapeHtml(branding.usdot.trim())         : "";
+  const mc      = branding.mcNumber?.trim()      ? escapeHtml(branding.mcNumber.trim())      : "";
 
   if (!name && !company && !phone && !website && !usdot && !mc) return "";
 
@@ -130,8 +161,8 @@ function buildSignatureHtml(
   if (mc)    creds.push(`MC #${mc}`);
   if (creds.length) lines.push(creds.join(" &nbsp;&middot;&nbsp; "));
 
-  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top:28px;">
-<tr><td style="padding-top:20px;border-top:1px solid ${borderColor};">
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top:24px;">
+<tr><td class="em-sig" style="padding-top:20px;border-top:1px solid ${borderColor};">
 <p style="margin:0;font-family:${fontFamily};color:#64748b;font-size:13px;line-height:2.0;">
 Best regards,<br>${lines.join("<br>")}
 </p>
@@ -142,11 +173,11 @@ Best regards,<br>${lines.join("<br>")}
 // ─── Master builder ───────────────────────────────────────────────────────────
 
 /**
- * Builds a complete HTML email.
+ * Builds a complete, mobile-responsive HTML email.
  *
  * @param body     - Raw template body text with {variable} placeholders
- * @param row      - Lead-specific values from CSV: {name}, {vehicle}, {pickup}, {delivery}, {price}, {route}
- * @param branding - User's company settings — applied to header/signature automatically
+ * @param row      - Lead-specific values from CSV
+ * @param branding - User's company settings — header/signature only, never hardcoded
  * @param options  - style + useSignatureBuilder toggle
  */
 export function buildHtmlEmail(
@@ -167,7 +198,6 @@ export function buildHtmlEmail(
 }
 
 // ─── Style: Clean ─────────────────────────────────────────────────────────────
-// Blue/accent colored header bar; crisp white body.
 
 function cleanTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -175,12 +205,13 @@ function cleanTemplate(
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#1d4ed8";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
 
-  // Header: only render if company name is set in branding — no fallback text
   const headerRow = company
     ? `<tr>
-        <td bgcolor="${accent}" style="background-color:${accent};padding:24px 40px;">
-          <p style="margin:0;font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>
+        <td class="em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:24px 40px;">
+          <p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>
+          ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.78);font-size:12px;font-weight:400;letter-spacing:0.3px;line-height:1.4;">${tagline}</p>` : ""}
         </td>
       </tr>`
     : "";
@@ -189,15 +220,17 @@ function cleanTemplate(
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
 
   return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="X-UA-Compatible" content="IE=edge"></head>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead()}</head>
 <body style="margin:0;padding:0;background-color:#f8fafc;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f8fafc" style="background-color:#f8fafc;">
-<tr><td align="center" style="padding:40px 20px;">
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;background-color:#ffffff;border:1px solid #e2e8f0;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f8fafc" style="background-color:#f8fafc;width:100%;">
+<tr><td class="em-wrapper-td" align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #e2e8f0;">
 ${headerRow}
-<tr><td style="padding:40px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<tr><td class="em-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
 </table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>
@@ -205,7 +238,6 @@ ${headerRow}
 }
 
 // ─── Style: Modern ────────────────────────────────────────────────────────────
-// Solid purple/accent header; light gray outer background.
 
 function modernTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -213,29 +245,32 @@ function modernTemplate(
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#4f46e5";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
 
-  // No company = thin accent bar with no text (no hardcoded fallback label)
   const headerRow = company
     ? `<tr>
-        <td bgcolor="${accent}" style="background-color:${accent};padding:28px 40px;">
-          <p style="margin:0;font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>
+        <td class="em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:28px 40px;">
+          <p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>
+          ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.78);font-size:12px;font-weight:400;letter-spacing:0.3px;line-height:1.4;">${tagline}</p>` : ""}
         </td>
       </tr>`
-    : `<tr><td bgcolor="${accent}" style="background-color:${accent};padding:6px 40px;"></td></tr>`;
+    : `<tr><td bgcolor="${accent}" style="background-color:${accent};padding:5px 40px;"></td></tr>`;
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
 
   return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="X-UA-Compatible" content="IE=edge"></head>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead()}</head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f1f5f9" style="background-color:#f1f5f9;">
-<tr><td align="center" style="padding:40px 20px;">
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;background-color:#ffffff;border:1px solid #e2e8f0;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f1f5f9" style="background-color:#f1f5f9;width:100%;">
+<tr><td class="em-wrapper-td" align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #e2e8f0;">
 ${headerRow}
-<tr><td style="padding:40px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<tr><td class="em-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
 </table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>
@@ -243,7 +278,6 @@ ${headerRow}
 }
 
 // ─── Style: Minimal ───────────────────────────────────────────────────────────
-// White background; thin colored top border; company name above body (if set).
 
 function minimalTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -251,11 +285,13 @@ function minimalTemplate(
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#2563eb";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
 
   const companyRow = company
     ? `<tr>
-        <td style="padding:24px 0 20px;border-bottom:1px solid #e2e8f0;">
-          <p style="margin:0;font-family:${FONT};color:${accent};font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${company}</p>
+        <td class="em-hdr" style="padding:28px 0 18px;border-bottom:1px solid #e2e8f0;">
+          <p class="em-co" style="margin:0${tagline ? " 0 4px" : ""};font-family:${FONT};color:${accent};font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${company}</p>
+          ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:#64748b;font-size:11px;font-weight:400;letter-spacing:0.5px;text-transform:uppercase;">${tagline}</p>` : ""}
         </td>
       </tr>
       <tr><td style="padding:4px 0;"></td></tr>`
@@ -265,15 +301,17 @@ function minimalTemplate(
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#f1f5f9", FONT) : "";
 
   return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="X-UA-Compatible" content="IE=edge"></head>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`@media only screen and (max-width:600px){.em-minimal-card{width:100%!important;padding:0 16px!important;}}`)}</head>
 <body style="margin:0;padding:0;background-color:#ffffff;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff;">
-<tr><td align="center" style="padding:48px 24px;">
-<table role="presentation" width="560" cellspacing="0" cellpadding="0" border="0" style="width:560px;max-width:100%;border-top:3px solid ${accent};">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff;width:100%;">
+<tr><td class="em-wrapper-td" align="center" style="padding:40px 24px;">
+<!--[if (gte mso 9)|(IE)]><table width="560" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:560px;max-width:560px;border-top:3px solid ${accent};">
 ${companyRow}
-<tr><td style="padding:8px 0 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<tr><td class="em-body" style="padding:12px 0 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
 </table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>
@@ -281,7 +319,6 @@ ${companyRow}
 }
 
 // ─── Style: Luxury ────────────────────────────────────────────────────────────
-// Dark navy outer; gold border accent; white inner body.
 
 function luxuryTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -289,38 +326,48 @@ function luxuryTemplate(
   const HEADING_FONT = "Arial, Helvetica, sans-serif";
   const BODY_FONT    = "Georgia, 'Times New Roman', serif";
   const company      = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline      = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
 
-  // Only show header content if company name is set — no fallback taglines
-  const headerInner = company
-    ? `<p style="margin:0;font-family:${HEADING_FONT};color:#f8fafc;font-size:22px;font-weight:700;line-height:1.3;">${company}</p>`
+  const headerPad    = company ? "30px 40px" : "14px 40px";
+  const headerInner  = company
+    ? `<p class="em-co" style="margin:0${tagline ? " 0 6px" : ""};font-family:${HEADING_FONT};color:#f8fafc;font-size:22px;font-weight:700;letter-spacing:0.5px;line-height:1.3;">${company}</p>
+       ${tagline ? `<p class="em-tag" style="margin:0;font-family:${HEADING_FONT};color:rgba(212,175,55,0.85);font-size:11px;font-weight:400;letter-spacing:1.5px;text-transform:uppercase;">${tagline}</p>` : ""}`
     : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), BODY_FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#d97706", HEADING_FONT) : "";
 
   return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="X-UA-Compatible" content="IE=edge"></head>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-lux-hdr{padding:22px 24px!important;}
+  .em-lux-body{padding:32px 24px 28px!important;}
+  .em-lux-foot{padding:14px 24px!important;}
+  .em-co{font-size:19px!important;}
+}`)}</head>
 <body style="margin:0;padding:0;background-color:#0f172a;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#0f172a" style="background-color:#0f172a;">
-<tr><td align="center" style="padding:40px 20px;">
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#0f172a" style="background-color:#0f172a;width:100%;">
+<tr><td class="em-wrapper-td" align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;">
 <tr>
-  <td bgcolor="#0f172a" style="background-color:#0f172a;padding:${company ? "32px" : "16px"} 48px;border-top:2px solid #d97706;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+  <td class="em-lux-hdr em-hdr" bgcolor="#0f172a" style="background-color:#0f172a;padding:${headerPad};border-top:2px solid #d97706;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
     ${headerInner}
   </td>
 </tr>
 <tr>
-  <td bgcolor="#ffffff" style="background-color:#ffffff;padding:48px 48px 40px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;font-family:${BODY_FONT};">
+  <td class="em-lux-body em-body" bgcolor="#ffffff" style="background-color:#ffffff;padding:44px 48px 40px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;font-family:${BODY_FONT};">
     ${bodyHtml}${sigHtml}
   </td>
 </tr>
 <tr>
-  <td bgcolor="#0f172a" style="background-color:#0f172a;padding:16px 48px;border-bottom:2px solid #d97706;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
+  <td class="em-lux-foot" bgcolor="#0f172a" style="background-color:#0f172a;padding:14px 48px;border-bottom:2px solid #d97706;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
     <p style="margin:0;font-size:1px;line-height:1px;">&#160;</p>
   </td>
 </tr>
 </table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
 </table>
 </body>

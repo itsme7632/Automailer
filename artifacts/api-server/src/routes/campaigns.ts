@@ -14,6 +14,7 @@ const router: IRouter = Router();
 function userBranding(user: User): BrandingSettings {
   return {
     companyName:    user.companyName    ?? null,
+    companyTagline: user.companyTagline ?? null,
     companyPhone:   user.companyPhone   ?? null,
     companyWebsite: user.companyWebsite ?? null,
     usdot:          user.usdot          ?? null,
