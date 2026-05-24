@@ -35,13 +35,15 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
   );
 }
 
-const BRANDING_VARIABLES = [
-  { var: "{company_name}",    desc: "Your company name" },
-  { var: "{company_website}", desc: "Company website" },
-  { var: "{company_phone}",   desc: "Company phone number" },
-  { var: "{usdot}",           desc: "USDOT registration number" },
-  { var: "{mc_number}",       desc: "MC (Motor Carrier) number" },
-  { var: "{agent_name}",      desc: "Your name (from CSV column)" },
+/** Variables users put inside template bodies */
+const TEMPLATE_VARIABLES = [
+  { var: "{name}",     desc: "Recipient's name" },
+  { var: "{vehicle}",  desc: "Vehicle (year/make/model)" },
+  { var: "{pickup}",   desc: "Pickup location" },
+  { var: "{delivery}", desc: "Delivery location" },
+  { var: "{price}",    desc: "Transport price (auto-formats)" },
+  { var: "{route}",    desc: "Route summary" },
+  { var: "{agent_name}", desc: "Sending agent's name (CSV column)" },
 ];
 
 export default function Settings() {
@@ -238,16 +240,24 @@ export default function Settings() {
               </div>
             </div>
 
-            {/* Available variables */}
-            <div className="pt-4 border-t border-border">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Use in templates</p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                {BRANDING_VARIABLES.map(v => (
-                  <div key={v.var} className="flex flex-col gap-0.5 p-2 rounded-lg bg-slate-50 border border-slate-100">
-                    <code className="text-xs font-mono text-blue-600 font-semibold">{v.var}</code>
-                    <span className="text-xs text-slate-500">{v.desc}</span>
-                  </div>
-                ))}
+            {/* How branding works */}
+            <div className="pt-4 border-t border-border space-y-3">
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                <p className="text-xs font-semibold text-blue-800 mb-1">Automatic — no variables needed</p>
+                <p className="text-xs text-blue-700 leading-relaxed">
+                  Your company name appears in the email header automatically. When "Automatic Signature" is enabled, phone, website, USDOT, and MC# are appended to every draft — no template editing required.
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Use these in template bodies</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {TEMPLATE_VARIABLES.map(v => (
+                    <div key={v.var} className="flex flex-col gap-0.5 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                      <code className="text-xs font-mono text-blue-600 font-semibold">{v.var}</code>
+                      <span className="text-xs text-slate-500">{v.desc}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
 
