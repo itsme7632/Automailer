@@ -17,6 +17,14 @@ export const usersTable = pgTable("users", {
   gmailTokenExpiry: timestamp("gmail_token_expiry"),
   timezone: text("timezone").default("UTC"),
   aiTone: text("ai_tone").default("professional"),
+  // ── Company branding ─────────────────────────────────────────────────────
+  companyName: text("company_name"),
+  companyWebsite: text("company_website"),
+  companyPhone: text("company_phone"),
+  usdot: text("usdot"),
+  mcNumber: text("mc_number"),
+  accentColor: text("accent_color"),
+  // ─────────────────────────────────────────────────────────────────────────
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

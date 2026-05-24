@@ -1,0 +1,47 @@
+import { Router, type IRouter } from "express";
+import { db, usersTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
+import { requireAuth } from "../lib/auth";
+
+const router: IRouter = Router();
+
+/** GET /api/users/branding — return the current user's company branding settings */
+router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const [row] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+  res.json({
+    companyName:    row?.companyName    ?? "",
+    companyWebsite: row?.companyWebsite ?? "",
+    companyPhone:   row?.companyPhone   ?? "",
+    usdot:          row?.usdot          ?? "",
+    mcNumber:       row?.mcNumber       ?? "",
+    accentColor:    row?.accentColor    ?? "",
+  });
+});
+
+/** PUT /api/users/branding — save company branding settings */
+router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const { companyName, companyWebsite, companyPhone, usdot, mcNumber, accentColor } = req.body as {
+    companyName?: string;
+    companyWebsite?: string;
+    companyPhone?: string;
+    usdot?: string;
+    mcNumber?: string;
+    accentColor?: string;
+  };
+
+  await db.update(usersTable).set({
+    companyName:    companyName?.trim()    || null,
+    companyWebsite: companyWebsite?.trim() || null,
+    companyPhone:   companyPhone?.trim()   || null,
+    usdot:          usdot?.trim()          || null,
+    mcNumber:       mcNumber?.trim()       || null,
+    accentColor:    accentColor?.trim()    || null,
+    updatedAt: new Date(),
+  }).where(eq(usersTable.id, user.id));
+
+  res.json({ ok: true });
+});
+
+export default router;

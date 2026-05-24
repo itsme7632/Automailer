@@ -11,6 +11,7 @@ import draftsRouter from "./drafts";
 import uploadsRouter from "./uploads";
 import adminRouter from "./admin";
 import diagnosticsRouter from "./diagnostics";
+import brandingRouter from "./branding";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use(draftsRouter);
 router.use(uploadsRouter);
 router.use(adminRouter);
 router.use(diagnosticsRouter);
+router.use(brandingRouter);
 
 export default router;
