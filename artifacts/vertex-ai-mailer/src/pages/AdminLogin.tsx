@@ -54,7 +54,7 @@ export default function AdminLogin() {
           <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-lg shadow-blue-500/25 mb-4">
             <Zap className="h-7 w-7 text-white" />
           </div>
-          <h1 className="text-white text-xl font-bold tracking-tight">Vertex Mailer</h1>
+          <h1 className="text-white text-xl font-bold tracking-tight">BrokerMail AI</h1>
           <div className="flex items-center gap-1.5 mt-2">
             <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />
             <span className="text-blue-400 text-xs font-medium tracking-wider uppercase">Admin Portal</span>
@@ -73,7 +73,7 @@ export default function AdminLogin() {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="admin@vertexmailer.ai"
+                placeholder="admin@brokermail.ai"
                 required
                 autoComplete="email"
                 className="h-11 bg-slate-800 border-slate-700 text-white placeholder:text-slate-500 focus:border-blue-500 focus:ring-blue-500/20 rounded-xl"

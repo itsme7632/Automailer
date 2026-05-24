@@ -80,7 +80,7 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
           <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
             <Zap className="h-4 w-4 text-white" />
           </div>
-          <span className="font-semibold text-slate-900 tracking-tight">Vertex Mailer</span>
+          <span className="font-semibold text-slate-900 tracking-tight">BrokerMail AI</span>
         </Link>
         {onClose && (
           <button onClick={onClose} className="ml-auto p-1.5 rounded hover:bg-slate-100 text-slate-400">
@@ -184,7 +184,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="h-6 w-6 rounded bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
               <Zap className="h-3.5 w-3.5 text-white" />
             </div>
-            <span className="font-semibold text-slate-900 text-sm">Vertex Mailer</span>
+            <span className="font-semibold text-slate-900 text-sm">BrokerMail AI</span>
           </div>
         </header>
 

@@ -20,7 +20,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
               <Zap className="h-5 w-5 text-white" />
             </div>
-            <span className="font-bold text-xl text-slate-900 tracking-tight">Vertex Mailer</span>
+            <span className="font-bold text-xl text-slate-900 tracking-tight">BrokerMail AI</span>
           </Link>
           {children}
         </div>

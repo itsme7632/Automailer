@@ -51,7 +51,7 @@ export default function Register() {
       const newUser = await register(data);
       toast({
         title: "Account created!",
-        description: "Welcome to Vertex Mailer. Let's get started.",
+        description: "Welcome to BrokerMail AI. Let's get started.",
       });
       setLocation(newUser.role === "admin" ? "/admin/dashboard" : "/dashboard");
     } catch (err: any) {

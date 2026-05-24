@@ -35,7 +35,7 @@ app.use("/api", router);
 // Idempotent admin seed — creates default admin account on first boot
 // ---------------------------------------------------------------------------
 async function seedAdmin(): Promise<void> {
-  const ADMIN_EMAIL = "admin@vertexmailer.ai";
+  const ADMIN_EMAIL = "admin@brokermail.ai";
   const ADMIN_PASSWORD = "Admin@12345";
   try {
     const [existing] = await db

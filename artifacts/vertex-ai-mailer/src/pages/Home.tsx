@@ -22,7 +22,7 @@ export default function Home() {
             <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
               <Zap className="h-4 w-4 text-white" />
             </div>
-            <span className="font-bold text-slate-900 tracking-tight">Vertex Mailer</span>
+            <span className="font-bold text-slate-900 tracking-tight">BrokerMail AI</span>
           </div>
           <div className="flex items-center gap-3">
             <Button variant="ghost" asChild className="hidden sm:inline-flex text-slate-600 hover:text-slate-900">
@@ -63,7 +63,7 @@ export default function Home() {
 
               <p className="text-lg text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed">
                 Write your own email template with dynamic variables, upload your leads CSV,
-                and Vertex Mailer creates personalized Gmail drafts — ready to review and send.
+                and BrokerMail AI creates personalized Gmail drafts — ready to review and send.
               </p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -218,7 +218,7 @@ export default function Home() {
             <div className="h-6 w-6 rounded-md bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
               <Zap className="h-3.5 w-3.5 text-white" />
             </div>
-            <span className="font-semibold text-slate-900 text-sm">Vertex Mailer</span>
+            <span className="font-semibold text-slate-900 text-sm">BrokerMail AI</span>
           </div>
           <p className="text-xs text-slate-400">Engineered for vehicle shipping brokers.</p>
         </div>
