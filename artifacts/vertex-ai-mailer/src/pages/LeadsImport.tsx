@@ -84,6 +84,14 @@ export default function LeadsImport() {
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [emailStyle, setEmailStyle]                 = useState<EmailStyle>("clean");
   const [useSignatureBuilder, setUseSignatureBuilder] = useState(false);
+  // Load user's saved signature default from branding settings
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token");
+    fetch("/api/users/branding", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => { if (typeof d.useSignature === "boolean") setUseSignatureBuilder(d.useSignature); })
+      .catch(() => {});
+  }, []);
   const [isCreating, setIsCreating]                 = useState(false);
   const [createResult, setCreateResult]             = useState<CreateResult | null>(null);
 

@@ -158,37 +158,74 @@ router.post("/drafts/create-direct", requireAuth, async (req, res): Promise<void
   }
 });
 
-// ─── Preview ──────────────────────────────────────────────────────────────────
-
+// ─── Preview ─────────────────────────────────────────────────────────────────
+/**
+ * POST /api/drafts/preview
+ *
+ * Accepts EITHER:
+ *   { templateId, row, style, useSignatureBuilder }  — loads template from DB
+ *   { body, subject, row, style, useSignatureBuilder } — uses raw body/subject directly
+ *
+ * Always applies the authenticated user's saved branding settings.
+ * This is the single source of truth for how a rendered email looks.
+ */
 router.post("/drafts/preview", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { templateId, row, style, useSignatureBuilder } = req.body as {
+  const {
+    templateId,
+    body: rawBody,
+    subject: rawSubject,
+    row,
+    style,
+    useSignatureBuilder,
+  } = req.body as {
     templateId?:          number;
+    body?:                string;
+    subject?:             string;
     row?:                 Record<string, string>;
     style?:               string;
     useSignatureBuilder?: boolean;
   };
 
-  if (!templateId || !row || typeof row !== "object") {
-    res.status(400).json({ error: "templateId and row are required" });
+  if (!row || typeof row !== "object") {
+    res.status(400).json({ error: "row is required" });
     return;
   }
 
-  const [template] = await db
-    .select()
-    .from(templatesTable)
-    .where(and(eq(templatesTable.id, templateId), eq(templatesTable.userId, user.id)));
-  if (!template) { res.status(404).json({ error: "Template not found" }); return; }
+  let templateBody: string;
+  let templateSubject: string;
+
+  if (rawBody !== undefined && rawSubject !== undefined) {
+    templateBody    = rawBody;
+    templateSubject = rawSubject;
+  } else if (templateId) {
+    const [template] = await db
+      .select()
+      .from(templatesTable)
+      .where(and(eq(templatesTable.id, templateId), eq(templatesTable.userId, user.id)));
+    if (!template) { res.status(404).json({ error: "Template not found" }); return; }
+    templateBody    = template.body;
+    templateSubject = template.subject;
+  } else {
+    res.status(400).json({ error: "Provide either templateId or body+subject" });
+    return;
+  }
 
   const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
   if (!freshUser) { res.status(404).json({ error: "User not found" }); return; }
 
-  const branding    = userBranding(freshUser);
-  const emailStyle  = validStyle(style);
-  const subject     = replaceVarsText(template.subject, row);
-  const html        = buildHtmlEmail(template.body, row, branding, {
+  const branding   = userBranding(freshUser);
+  const emailStyle = validStyle(style);
+
+  // useSignatureBuilder: explicit request value → user's saved default
+  const useSig = useSignatureBuilder !== undefined
+    ? useSignatureBuilder
+    : (freshUser.useSignature ?? false);
+
+  const subject = replaceVarsText(templateSubject, row);
+  const html    = buildHtmlEmail(templateBody, row, branding, {
     style:               emailStyle,
-    useSignatureBuilder: useSignatureBuilder ?? false,
+    useSignatureBuilder: useSig,
   });
 
   res.json({ html, subject });
@@ -226,9 +263,13 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  const branding   = userBranding(freshUser);
-  const buildOpts  = { style: emailStyle, useSignatureBuilder: useSignatureBuilder ?? false };
-  const baseUrl    = `${req.protocol}://${req.get("host")}`;
+  const branding  = userBranding(freshUser);
+  // useSignatureBuilder: explicit request value → user's saved default
+  const useSig    = useSignatureBuilder !== undefined
+    ? useSignatureBuilder
+    : (freshUser.useSignature ?? false);
+  const buildOpts = { style: emailStyle, useSignatureBuilder: useSig };
+  const baseUrl   = `${req.protocol}://${req.get("host")}`;
 
   const results: {
     email: string; subject: string; status: string; gmailDraftId?: string; error?: string;
@@ -251,30 +292,20 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
     const bodyText = replaceVarsText(template.body, row);
     const bodyHtml = buildHtmlEmail(template.body, row, branding, buildOpts);
 
-    const trackingId = randomUUID();
+    const trackingId  = randomUUID();
     const trackedHtml = injectTracking(bodyHtml, trackingId, baseUrl);
 
     try {
       const gmailDraftId = await createGmailDraft(freshUser, email, subject, bodyText, trackedHtml);
       await db.insert(draftsTable).values({
-        userId: user.id,
-        gmailDraftId,
-        subject,
-        body: bodyText,
-        status: "success",
-        trackingId,
+        userId: user.id, gmailDraftId, subject, body: bodyText, status: "success", trackingId,
       });
       results.push({ email, subject, status: "success", gmailDraftId });
       succeeded++;
     } catch (err: any) {
       const errMsg = String(err?.message ?? "Unknown error");
       await db.insert(draftsTable).values({
-        userId: user.id,
-        subject,
-        body: bodyText,
-        status: "failed",
-        errorMessage: errMsg,
-        trackingId,
+        userId: user.id, subject, body: bodyText, status: "failed", errorMessage: errMsg, trackingId,
       });
       results.push({ email, subject, status: "failed", error: errMsg });
       failed++;

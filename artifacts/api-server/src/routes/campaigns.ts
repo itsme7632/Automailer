@@ -1,12 +1,26 @@
 import { Router, type IRouter } from "express";
-import { db, campaignsTable, leadsTable, draftsTable, templatesTable, activityTable } from "@workspace/db";
+import { db, campaignsTable, leadsTable, draftsTable, templatesTable, activityTable, usersTable } from "@workspace/db";
 import { eq, and, count, sql, desc } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { CreateCampaignBody, UpdateCampaignBody, GetCampaignParams, UpdateCampaignParams, DeleteCampaignParams, GenerateCampaignDraftsParams, GenerateCampaignDraftsBody } from "@workspace/api-zod";
 import { generatePersonalizedEmail } from "../lib/ai";
 import { createGmailDraft } from "../lib/gmail";
+import { buildHtmlEmail, type BrandingSettings } from "../lib/email-html";
+import type { User } from "@workspace/db";
+import { randomUUID } from "crypto";
 
 const router: IRouter = Router();
+
+function userBranding(user: User): BrandingSettings {
+  return {
+    companyName:    user.companyName    ?? null,
+    companyPhone:   user.companyPhone   ?? null,
+    companyWebsite: user.companyWebsite ?? null,
+    usdot:          user.usdot          ?? null,
+    mcNumber:       user.mcNumber       ?? null,
+    accentColor:    user.accentColor    ?? null,
+  };
+}
 
 router.get("/campaigns", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
@@ -87,7 +101,9 @@ router.post("/campaigns/:id/generate-drafts", requireAuth, async (req, res): Pro
     .where(and(eq(campaignsTable.id, params.data.id), eq(campaignsTable.userId, user.id)));
   if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
 
-  if (!user.gmailConnected || !user.gmailAccessToken) {
+  // Load fresh user with branding settings
+  const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+  if (!freshUser?.gmailConnected || !freshUser.gmailAccessToken) {
     res.status(400).json({ error: "Gmail not connected. Please connect Gmail first." });
     return;
   }
@@ -98,6 +114,10 @@ router.post("/campaigns/:id/generate-drafts", requireAuth, async (req, res): Pro
 
   const leads = await db.select().from(leadsTable)
     .where(and(eq(leadsTable.campaignId, params.data.id), eq(leadsTable.status, "new")));
+
+  const branding   = userBranding(freshUser);
+  const useSig     = freshUser.useSignature ?? false;
+  const emailStyle = (body.data as any).style ?? "clean";
 
   let succeeded = 0;
   let failed = 0;
@@ -120,13 +140,37 @@ router.post("/campaigns/:id/generate-drafts", requireAuth, async (req, res): Pro
         customPrompt: body.data.customPrompt,
       });
 
-      const gmailDraftId = await createGmailDraft(user, lead.email, generated.subject, generated.body);
+      // Build lead row for HTML rendering
+      const leadRow: Record<string, string> = {
+        name:     lead.name     ?? "",
+        email:    lead.email    ?? "",
+        vehicle:  lead.vehicle  ?? "",
+        route:    lead.route    ?? "",
+        pickup:   lead.pickup   ?? "",
+        delivery: lead.delivery ?? "",
+        price:    lead.price    ?? "",
+        notes:    lead.notes    ?? "",
+      };
+
+      // Apply the full HTML template pipeline — same as from-template
+      const bodyHtml = buildHtmlEmail(generated.body, leadRow, branding, {
+        style:               emailStyle,
+        useSignatureBuilder: useSig,
+      });
+
+      const trackingId  = randomUUID();
+      const gmailDraftId = await createGmailDraft(
+        freshUser, lead.email, generated.subject, generated.body, bodyHtml
+      );
 
       await db.insert(draftsTable).values({
         userId: user.id, campaignId: campaign.id, leadId: lead.id,
-        gmailDraftId, subject: generated.subject, body: generated.body, status: "success",
+        gmailDraftId, subject: generated.subject, body: generated.body,
+        status: "success", trackingId,
       });
-      await db.update(leadsTable).set({ status: "drafted", gmailDraftId, updatedAt: new Date() }).where(eq(leadsTable.id, lead.id));
+      await db.update(leadsTable)
+        .set({ status: "drafted", gmailDraftId, updatedAt: new Date() })
+        .where(eq(leadsTable.id, lead.id));
       succeeded++;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -134,7 +178,9 @@ router.post("/campaigns/:id/generate-drafts", requireAuth, async (req, res): Pro
         userId: user.id, campaignId: campaign.id, leadId: lead.id,
         subject: "", body: "", status: "failed", errorMessage: errMsg,
       });
-      await db.update(leadsTable).set({ status: "failed", errorMessage: errMsg, updatedAt: new Date() }).where(eq(leadsTable.id, lead.id));
+      await db.update(leadsTable)
+        .set({ status: "failed", errorMessage: errMsg, updatedAt: new Date() })
+        .where(eq(leadsTable.id, lead.id));
       errors.push(`Lead ${lead.email}: ${errMsg}`);
       failed++;
     }
@@ -144,7 +190,7 @@ router.post("/campaigns/:id/generate-drafts", requireAuth, async (req, res): Pro
   await db.update(campaignsTable).set({
     status: newStatus,
     draftedCount: sql`${campaignsTable.draftedCount} + ${succeeded}`,
-    failedCount: sql`${campaignsTable.failedCount} + ${failed}`,
+    failedCount:  sql`${campaignsTable.failedCount}  + ${failed}`,
     updatedAt: new Date(),
   }).where(eq(campaignsTable.id, campaign.id));
 

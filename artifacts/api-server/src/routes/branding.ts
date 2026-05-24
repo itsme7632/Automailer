@@ -5,7 +5,6 @@ import { requireAuth } from "../lib/auth";
 
 const router: IRouter = Router();
 
-/** GET /api/users/branding — return the current user's company branding settings */
 router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
   const [row] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
@@ -16,19 +15,20 @@ router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
     usdot:          row?.usdot          ?? "",
     mcNumber:       row?.mcNumber       ?? "",
     accentColor:    row?.accentColor    ?? "",
+    useSignature:   row?.useSignature   ?? false,
   });
 });
 
-/** PUT /api/users/branding — save company branding settings */
 router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
-  const { companyName, companyWebsite, companyPhone, usdot, mcNumber, accentColor } = req.body as {
+  const { companyName, companyWebsite, companyPhone, usdot, mcNumber, accentColor, useSignature } = req.body as {
     companyName?: string;
     companyWebsite?: string;
     companyPhone?: string;
     usdot?: string;
     mcNumber?: string;
     accentColor?: string;
+    useSignature?: boolean;
   };
 
   await db.update(usersTable).set({
@@ -38,6 +38,7 @@ router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
     usdot:          usdot?.trim()          || null,
     mcNumber:       mcNumber?.trim()       || null,
     accentColor:    accentColor?.trim()    || null,
+    useSignature:   useSignature === true,
     updatedAt: new Date(),
   }).where(eq(usersTable.id, user.id));
 

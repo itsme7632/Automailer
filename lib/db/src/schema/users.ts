@@ -24,6 +24,7 @@ export const usersTable = pgTable("users", {
   usdot: text("usdot"),
   mcNumber: text("mc_number"),
   accentColor: text("accent_color"),
+  useSignature: boolean("use_signature").notNull().default(false),
   // ─────────────────────────────────────────────────────────────────────────
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),

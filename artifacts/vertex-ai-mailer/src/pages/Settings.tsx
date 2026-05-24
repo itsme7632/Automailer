@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Loader2, CheckCircle2, Mail, Cpu, Database, Key, AlertCircle,
-  RefreshCw, Building2, Globe, Phone, Hash, Palette,
+  RefreshCw, Building2, Globe, Phone, Hash, Palette, PenLine,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -21,7 +21,7 @@ interface DiagnosticsResult {
 
 interface BrandingData {
   companyName: string; companyWebsite: string; companyPhone: string;
-  usdot: string; mcNumber: string; accentColor: string;
+  usdot: string; mcNumber: string; accentColor: string; useSignature: boolean;
 }
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -62,7 +62,7 @@ export default function Settings() {
   // Branding
   const [branding, setBranding] = useState<BrandingData>({
     companyName: "", companyWebsite: "", companyPhone: "",
-    usdot: "", mcNumber: "", accentColor: "",
+    usdot: "", mcNumber: "", accentColor: "", useSignature: false,
   });
   const [isSavingBranding, setIsSavingBranding] = useState(false);
   const [brandingSaved, setBrandingSaved] = useState(false);
@@ -240,12 +240,42 @@ export default function Settings() {
               </div>
             </div>
 
+            {/* Automatic Signature Toggle */}
+            <div className="pt-4 border-t border-border">
+              <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <PenLine className="h-4 w-4 text-slate-400 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-slate-800">Automatic Signature</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {branding.useSignature
+                        ? "On — phone, website, USDOT & MC# are appended to every draft automatically"
+                        : "Off — template content is sent exactly as written, no additions"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setBranding(b => ({ ...b, useSignature: !b.useSignature }))}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none ${
+                    branding.useSignature ? "bg-blue-600" : "bg-slate-200"
+                  }`}
+                  role="switch"
+                  aria-checked={branding.useSignature}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow ring-0 transition-transform ${
+                    branding.useSignature ? "translate-x-5" : "translate-x-0"
+                  }`} />
+                </button>
+              </div>
+            </div>
+
             {/* How branding works */}
-            <div className="pt-4 border-t border-border space-y-3">
+            <div className="space-y-3">
               <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
                 <p className="text-xs font-semibold text-blue-800 mb-1">Automatic — no variables needed</p>
                 <p className="text-xs text-blue-700 leading-relaxed">
-                  Your company name appears in the email header automatically. When "Automatic Signature" is enabled, phone, website, USDOT, and MC# are appended to every draft — no template editing required.
+                  Your company name appears in the email header automatically. When "Automatic Signature" is enabled above, phone, website, USDOT, and MC# are appended to every draft.
                 </p>
               </div>
               <div>
