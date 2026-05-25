@@ -131,10 +131,11 @@ async function _appendToSent(mailbox: Mailbox, rawMessage: Buffer): Promise<void
       await client.append(targetFolder, rawMessage, ["\\Seen"]);
     }
   } finally {
-    // close() is synchronous and safe even if the connection is already gone.
-    // logout() is async and can throw "Connection not available" if the server
-    // already closed the socket — that's what caused the original crash.
-    try { client.close(); } catch { }
+    // Do NOT call client.close() here — it throws "Connection not available"
+    // synchronously when the server has already torn down the socket, and that
+    // throw escapes into processTicksAndRejections (outside our try/catch).
+    // logout() is async; we fire-and-forget it with .catch so it cannot reject.
+    client.logout().catch(() => {});
   }
 }
 
