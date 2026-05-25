@@ -7,3 +7,4 @@ export * from "./activity";
 export * from "./email_tracking";
 export * from "./mailboxes";
 export * from "./admin_settings";
+export * from "./plans";

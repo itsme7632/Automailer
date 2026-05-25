@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, plansTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
 
@@ -58,5 +58,47 @@ async function seedAdmin(): Promise<void> {
 }
 
 seedAdmin().catch(() => {});
+
+// ---------------------------------------------------------------------------
+// Idempotent plan seed — creates default plans on first boot
+// ---------------------------------------------------------------------------
+async function seedPlans(): Promise<void> {
+  const defaults = [
+    {
+      slug: "free", name: "Free", sortOrder: 0,
+      description: "Get started with the basics",
+      monthlyEmailLimit: 100, smtpAccountsLimit: 1,
+      campaignsLimit: 5, batchSendLimit: 50,
+      features: ["100 emails/month", "1 SMTP mailbox", "5 campaigns", "Batch size up to 50", "Community support"],
+    },
+    {
+      slug: "starter", name: "Starter", sortOrder: 1,
+      description: "Growing businesses & solo brokers",
+      monthlyEmailLimit: 1000, smtpAccountsLimit: 3,
+      campaignsLimit: 25, batchSendLimit: 100,
+      features: ["1,000 emails/month", "3 SMTP mailboxes", "25 campaigns", "Batch size up to 100", "Email support"],
+    },
+    {
+      slug: "growth", name: "Growth", sortOrder: 2,
+      description: "Scale your outreach operation",
+      monthlyEmailLimit: 5000, smtpAccountsLimit: 10,
+      campaignsLimit: -1, batchSendLimit: 500,
+      features: ["5,000 emails/month", "10 SMTP mailboxes", "Unlimited campaigns", "Batch size up to 500", "Priority support"],
+    },
+    {
+      slug: "enterprise", name: "Enterprise", sortOrder: 3,
+      description: "Full power for large teams",
+      monthlyEmailLimit: -1, smtpAccountsLimit: -1,
+      campaignsLimit: -1, batchSendLimit: -1,
+      features: ["Unlimited emails", "Unlimited mailboxes", "Unlimited campaigns", "Unlimited batch size", "Dedicated support"],
+    },
+  ];
+  for (const plan of defaults) {
+    await db.insert(plansTable).values(plan).onConflictDoNothing({ target: plansTable.slug });
+  }
+  logger.info("Plans seeded");
+}
+
+seedPlans().catch((err) => logger.warn({ err }, "Plan seed skipped (non-fatal)"));
 
 export default app;

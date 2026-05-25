@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   Server,
+  CreditCard,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { href: "/leads/import", icon: UploadCloud,     label: "Upload & Send", exact: true },
   { href: "/drafts",       icon: Mail,            label: "Gmail Drafts",  exact: false },
   { href: "/mailbox",      icon: Server,          label: "Mailbox",       exact: true },
+  { href: "/plans",        icon: CreditCard,      label: "Plans & Billing", exact: true },
 ];
 
 function NavItem({

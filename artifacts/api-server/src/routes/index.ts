@@ -14,6 +14,7 @@ import diagnosticsRouter from "./diagnostics";
 import brandingRouter from "./branding";
 import trackingRouter from "./tracking";
 import mailboxRouter from "./mailbox";
+import billingRouter from "./billing";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(diagnosticsRouter);
 router.use(brandingRouter);
 router.use(trackingRouter);
 router.use(mailboxRouter);
+router.use(billingRouter);
 
 export default router;

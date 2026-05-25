@@ -18,6 +18,7 @@ import TemplateEditor from "@/pages/TemplateEditor";
 import Drafts from "@/pages/Drafts";
 import Settings from "@/pages/Settings";
 import MailboxSettings from "@/pages/MailboxSettings";
+import Plans from "@/pages/Plans";
 import Admin from "@/pages/Admin";
 import AdminLogin from "@/pages/AdminLogin";
 import NotFound from "@/pages/not-found";
@@ -97,6 +98,12 @@ function Router() {
       <Route path="/mailbox">
         <ProtectedRoute>
           <AppLayout><MailboxSettings /></AppLayout>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/plans">
+        <ProtectedRoute>
+          <AppLayout><Plans /></AppLayout>
         </ProtectedRoute>
       </Route>
 
