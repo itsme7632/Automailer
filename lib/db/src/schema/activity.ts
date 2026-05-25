@@ -16,6 +16,7 @@ export const systemLogsTable = pgTable("system_logs", {
   id: serial("id").primaryKey(),
   userId: integer("user_id").references(() => usersTable.id, { onDelete: "set null" }),
   type: text("type").notNull(),
+  severity: text("severity").notNull().default("info"),
   description: text("description").notNull(),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

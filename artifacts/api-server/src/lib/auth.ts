@@ -50,6 +50,16 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
   (req as Request & { user: typeof user }).user = user;
+
+  // Update lastActiveAt at most once per hour (fire-and-forget)
+  const oneHourAgo = new Date(Date.now() - 3_600_000);
+  if (!user.lastActiveAt || user.lastActiveAt < oneHourAgo) {
+    db.update(usersTable)
+      .set({ lastActiveAt: new Date() })
+      .where(eq(usersTable.id, user.id))
+      .catch(() => {});
+  }
+
   next();
 }
 

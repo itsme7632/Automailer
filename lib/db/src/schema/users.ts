@@ -1,4 +1,4 @@
-import { pgTable, serial, text, boolean, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, boolean, timestamp, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -26,6 +26,11 @@ export const usersTable = pgTable("users", {
   mcNumber: text("mc_number"),
   accentColor: text("accent_color"),
   useSignature: boolean("use_signature").notNull().default(false),
+  // ── Plan / Credits / Status ───────────────────────────────────────────────
+  plan: text("plan").notNull().default("free"),
+  credits: integer("credits").notNull().default(0),
+  status: text("status").notNull().default("active"),
+  lastActiveAt: timestamp("last_active_at"),
   // ─────────────────────────────────────────────────────────────────────────
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
