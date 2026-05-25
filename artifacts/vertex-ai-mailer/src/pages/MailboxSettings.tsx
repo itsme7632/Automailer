@@ -317,7 +317,13 @@ export default function MailboxSettings() {
           <div className="p-6 grid sm:grid-cols-2 gap-4">
             <div className="sm:col-span-2">
               <Field label="SMTP Host" icon={Server} value={form.smtpHost}
-                onChange={v => set("smtpHost", v)} placeholder="smtp.hostinger.com" />
+                onChange={v => set("smtpHost", v)} placeholder="smtp.hostinger.com"
+                hint={
+                  form.smtpHost && !form.smtpHost.startsWith("mail.") && !form.smtpHost.includes("smtp.") && !form.smtpHost.includes("office365") && !form.smtpHost.includes("gmail")
+                    ? "⚠ cPanel/Hostinger tip: use mail.yourdomain.com, not yourdomain.com"
+                    : undefined
+                }
+              />
             </div>
             <Field label="Port" icon={Wifi} value={form.smtpPort}
               onChange={v => set("smtpPort", v)} placeholder="587" />

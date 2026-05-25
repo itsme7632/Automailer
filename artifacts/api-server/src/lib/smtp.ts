@@ -21,10 +21,53 @@ function buildTransportOptions(creds: SmtpCredentials, rawPass?: string) {
     requireTLS: isTLS,
     auth: { user: creds.smtpUser, pass },
     tls: { rejectUnauthorized: false },
-    connectionTimeout: 10_000,
-    greetingTimeout: 8_000,
-    socketTimeout: 15_000,
+    connectionTimeout: 15_000,
+    greetingTimeout: 20_000,
+    socketTimeout: 30_000,
   } as const;
+}
+
+/**
+ * Convert raw nodemailer/network errors into short, actionable messages.
+ * The cPanel / Hostinger / Zoho mistake of using "domain.com" instead of
+ * "mail.domain.com" as the SMTP host is the #1 cause of greeting timeouts.
+ */
+function friendlySmtpError(err: unknown): Error {
+  const msg = err instanceof Error ? err.message : String(err);
+  const code = (err as any)?.code as string | undefined;
+
+  if (
+    code === "ETIMEDOUT" ||
+    code === "ESOCKET" ||
+    msg.toLowerCase().includes("greeting") ||
+    msg.toLowerCase().includes("timeout")
+  ) {
+    return new Error(
+      `Connection timeout — the SMTP server did not respond. ` +
+      `For cPanel/Hostinger, the host should be mail.yourdomain.com, not yourdomain.com. ` +
+      `Check the host, port, and encryption settings in Mailbox Settings.`
+    );
+  }
+
+  if (code === "ECONNREFUSED") {
+    return new Error(
+      `Connection refused on port ${(err as any)?.port ?? "?"}. ` +
+      `SSL uses port 465, STARTTLS uses port 587. Check your port and encryption setting.`
+    );
+  }
+
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return new Error(
+      `SMTP host not found — "${(err as any)?.hostname ?? "?"}" does not resolve. ` +
+      `Check the hostname in Mailbox Settings.`
+    );
+  }
+
+  if (msg.toLowerCase().includes("invalid login") || msg.toLowerCase().includes("authentication")) {
+    return new Error(`Authentication failed — check your SMTP username and password.`);
+  }
+
+  return err instanceof Error ? err : new Error(msg);
 }
 
 /** Create a reusable Nodemailer transporter from a stored Mailbox row. */
@@ -42,6 +85,8 @@ export async function testSmtp(creds: SmtpCredentials & { rawPass?: string }): P
   );
   try {
     await transport.verify();
+  } catch (err) {
+    throw friendlySmtpError(err);
   } finally {
     transport.close();
   }
@@ -79,6 +124,8 @@ export async function sendEmail(
       replyTo: mailbox.replyTo ?? undefined,
     });
     return { messageId: info.messageId ?? "" };
+  } catch (err) {
+    throw friendlySmtpError(err);
   } finally {
     transport.close();
   }
