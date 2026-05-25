@@ -8,6 +8,10 @@ import { AdminRoute } from "@/components/AdminRoute";
 import { AppLayout } from "@/components/layout/AppLayout";
 
 import Home from "@/pages/Home";
+import Pricing from "@/pages/Pricing";
+import FAQ from "@/pages/FAQ";
+import Contact from "@/pages/Contact";
+import Trust from "@/pages/Trust";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import AuthCallback from "@/pages/AuthCallback";
@@ -37,6 +41,10 @@ function Router() {
     <Switch>
       {/* Public routes */}
       <Route path="/" component={Home} />
+      <Route path="/pricing" component={Pricing} />
+      <Route path="/faq" component={FAQ} />
+      <Route path="/contact" component={Contact} />
+      <Route path="/trust" component={Trust} />
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/auth/callback" component={AuthCallback} />
@@ -51,7 +59,6 @@ function Router() {
         </AdminRoute>
       </Route>
 
-      {/* /admin → redirect to /admin/dashboard (AdminRoute handles auth check) */}
       <Route path="/admin">
         <AdminRoute>
           <Redirect to="/admin/dashboard" />
