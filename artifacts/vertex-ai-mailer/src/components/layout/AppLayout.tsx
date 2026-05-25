@@ -12,6 +12,7 @@ import {
   ChevronUp,
   Menu,
   X,
+  Server,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,6 +30,7 @@ const NAV_ITEMS = [
   { href: "/templates",    icon: FileText,        label: "Templates",     exact: false },
   { href: "/leads/import", icon: UploadCloud,     label: "Upload & Send", exact: true },
   { href: "/drafts",       icon: Mail,            label: "Gmail Drafts",  exact: false },
+  { href: "/mailbox",      icon: Server,          label: "Mailbox",       exact: true },
 ];
 
 function NavItem({

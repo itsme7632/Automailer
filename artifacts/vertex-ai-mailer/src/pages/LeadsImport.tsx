@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   UploadCloud, File as FileIcon, Loader2, CheckCircle2, XCircle,
-  AlertCircle, Mail, FileText, RefreshCw, Zap, PenLine,
+  AlertCircle, Mail, FileText, RefreshCw, Zap, PenLine, Server, SendHorizonal,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
@@ -94,6 +94,20 @@ export default function LeadsImport() {
   }, []);
   const [isCreating, setIsCreating]                 = useState(false);
   const [createResult, setCreateResult]             = useState<CreateResult | null>(null);
+
+  const [mailboxConnected, setMailboxConnected] = useState(false);
+  const [sendMode, setSendMode]                 = useState<"gmail" | "smtp">("gmail");
+  const [smtpBatchSize, setSmtpBatchSize]       = useState<0 | 50 | 100 | 500>(0);
+  const [smtpSendResult, setSmtpSendResult]     = useState<CreateResult | null>(null);
+  const [smtpSending, setSmtpSending]           = useState(false);
+
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token");
+    fetch("/api/mailbox", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => { if (d?.smtpHost) setMailboxConnected(true); })
+      .catch(() => {});
+  }, []);
 
   // Unified preview state — fetched from the same pipeline as the actual draft
   const [previewHtml, setPreviewHtml]     = useState<string | null>(null);
@@ -208,6 +222,34 @@ export default function LeadsImport() {
     } finally { setIsCreating(false); }
   }
 
+  async function handleSmtpSend() {
+    if (!selectedTemplate || readyRows.length === 0) return;
+    const rowsToSend = smtpBatchSize > 0 ? readyRows.slice(0, smtpBatchSize) : readyRows;
+    setSmtpSending(true); setSmtpSendResult(null); setCreateResult(null);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/mailbox/send", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId: selectedTemplate.id,
+          rows: rowsToSend.map(toStringRow),
+          style: emailStyle,
+          useSignatureBuilder,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Send failed");
+      setSmtpSendResult(data);
+      toast({
+        title: `${data.succeeded} email${data.succeeded !== 1 ? "s" : ""} sent`,
+        description: data.failed > 0 ? `${data.failed} failed — see details below.` : "Delivered via your mailbox.",
+      });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Send Error", description: err.message });
+    } finally { setSmtpSending(false); }
+  }
+
   async function handleRetryFailed() {
     if (!selectedTemplate || !createResult) return;
     const failedEmails = new Set(createResult.results.filter(r => r.status === "failed").map(r => r.email));
@@ -241,6 +283,7 @@ export default function LeadsImport() {
   function handleReset() {
     setFile(null); setParseResult(null); setCreateResult(null);
     setPreviewHtml(null); setPreviewSubject(null);
+    setSmtpSendResult(null); setSendMode("gmail");
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -475,29 +518,135 @@ export default function LeadsImport() {
               </div>
             </div>
 
-            {/* Create button */}
+            {/* Delivery Method */}
+            <div className="px-6 py-5 border-b border-slate-100 space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="h-6 w-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center flex-shrink-0">4</div>
+                <h3 className="font-semibold text-slate-800 text-sm">Delivery Method</h3>
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                {/* Gmail Drafts */}
+                <button
+                  type="button"
+                  onClick={() => setSendMode("gmail")}
+                  className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${
+                    sendMode === "gmail" ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <Mail className={`h-5 w-5 mt-0.5 flex-shrink-0 ${sendMode === "gmail" ? "text-blue-600" : "text-slate-400"}`} />
+                  <div>
+                    <p className={`text-sm font-semibold ${sendMode === "gmail" ? "text-blue-900" : "text-slate-700"}`}>Gmail Drafts</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Saved to your Gmail. You review and send manually.</p>
+                    {!gmailConnected && <p className="text-xs text-amber-600 mt-1">⚠ Gmail not connected</p>}
+                  </div>
+                  {sendMode === "gmail" && <CheckCircle2 className="h-4 w-4 text-blue-600 ml-auto flex-shrink-0" />}
+                </button>
+
+                {/* SMTP Direct Send */}
+                <button
+                  type="button"
+                  onClick={() => setSendMode("smtp")}
+                  disabled={!mailboxConnected}
+                  className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${
+                    !mailboxConnected ? "border-slate-100 bg-slate-50 cursor-not-allowed opacity-60" :
+                    sendMode === "smtp" ? "border-emerald-500 bg-emerald-50" : "border-slate-200 hover:border-slate-300"
+                  }`}
+                >
+                  <Server className={`h-5 w-5 mt-0.5 flex-shrink-0 ${sendMode === "smtp" ? "text-emerald-600" : "text-slate-400"}`} />
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-sm font-semibold ${sendMode === "smtp" ? "text-emerald-900" : "text-slate-700"}`}>
+                      Send via SMTP
+                    </p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {mailboxConnected
+                        ? "Sent directly from your mailbox. Instant delivery."
+                        : "Connect a mailbox in Mailbox Settings first."}
+                    </p>
+                  </div>
+                  {sendMode === "smtp" && <CheckCircle2 className="h-4 w-4 text-emerald-600 ml-auto flex-shrink-0" />}
+                </button>
+              </div>
+
+              {/* SMTP batch size */}
+              {sendMode === "smtp" && mailboxConnected && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Batch size</p>
+                  <div className="flex flex-wrap gap-2">
+                    {([0, 50, 100, 500] as const).map(n => (
+                      <button
+                        key={n} type="button"
+                        onClick={() => setSmtpBatchSize(n)}
+                        className={`px-4 py-2 rounded-xl text-xs font-semibold border-2 transition-colors ${
+                          smtpBatchSize === n
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                            : "border-slate-200 text-slate-600 hover:border-slate-300"
+                        }`}
+                      >
+                        {n === 0
+                          ? `All (${readyCount})`
+                          : n >= readyCount ? `All (${readyCount})` : `${n} emails`}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    {smtpBatchSize === 0
+                      ? `Will send all ${readyCount} emails now.`
+                      : `Will send ${Math.min(smtpBatchSize, readyCount)} of ${readyCount} emails.`}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Action button */}
             <div className="px-6 py-5 flex items-center justify-between gap-4">
               <div>
-                <p className="text-sm text-slate-600">
-                  <span className="font-semibold text-slate-900">{readyCount} draft{readyCount !== 1 ? "s" : ""}</span> will be saved to Gmail Drafts.
-                </p>
-                <p className="text-xs text-slate-400 mt-0.5">Never auto-sent — you review before sending.</p>
+                {sendMode === "gmail" ? (
+                  <>
+                    <p className="text-sm text-slate-600">
+                      <span className="font-semibold text-slate-900">{readyCount} draft{readyCount !== 1 ? "s" : ""}</span> will be saved to Gmail.
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">Never auto-sent — review before sending.</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-slate-600">
+                      <span className="font-semibold text-slate-900">
+                        {smtpBatchSize === 0 || smtpBatchSize >= readyCount ? readyCount : smtpBatchSize} email{readyCount !== 1 ? "s" : ""}
+                      </span> will be sent immediately via SMTP.
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">Delivers to recipients' inboxes now.</p>
+                  </>
+                )}
               </div>
-              <Button
-                onClick={handleCreateDrafts}
-                disabled={isCreating || !gmailConnected}
-                className="gap-2 rounded-xl px-6 flex-shrink-0 bg-blue-600 hover:bg-blue-700"
-              >
-                {isCreating
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
-                  : <><Zap className="h-4 w-4" /> Create {readyCount} Gmail Draft{readyCount !== 1 ? "s" : ""}</>}
-              </Button>
+
+              {sendMode === "gmail" ? (
+                <Button
+                  onClick={handleCreateDrafts}
+                  disabled={isCreating || !gmailConnected}
+                  className="gap-2 rounded-xl px-6 flex-shrink-0 bg-blue-600 hover:bg-blue-700"
+                >
+                  {isCreating
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
+                    : <><Zap className="h-4 w-4" /> Create {readyCount} Gmail Draft{readyCount !== 1 ? "s" : ""}</>}
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleSmtpSend}
+                  disabled={smtpSending || !mailboxConnected}
+                  className="gap-2 rounded-xl px-6 flex-shrink-0 bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {smtpSending
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
+                    : <><SendHorizonal className="h-4 w-4" /> Send Now</>}
+                </Button>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Results */}
+      {/* Gmail Drafts Results */}
       <AnimatePresence>
         {createResult && (
           <motion.div
@@ -532,7 +681,6 @@ export default function LeadsImport() {
                 </div>
               </div>
             </div>
-
             {createResult.failed > 0 && (
               <div className="p-5 space-y-2">
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Failed rows</p>
@@ -547,12 +695,95 @@ export default function LeadsImport() {
                 ))}
               </div>
             )}
-
             <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/40">
               <Button asChild variant="ghost" size="sm" className="text-blue-600 hover:text-blue-700 gap-1.5">
                 <Link href="/drafts"><Mail className="h-3.5 w-3.5" /> View all Gmail drafts →</Link>
               </Button>
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* SMTP Send Results */}
+      <AnimatePresence>
+        {smtpSendResult && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
+          >
+            <div className="px-6 py-5 border-b border-slate-100">
+              <div className="flex items-center gap-4">
+                <div className={`h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${smtpSendResult.failed === 0 ? "bg-emerald-50" : "bg-amber-50"}`}>
+                  {smtpSendResult.failed === 0
+                    ? <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+                    : <AlertCircle className="h-6 w-6 text-amber-600" />}
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-slate-900">
+                    {smtpSendResult.succeeded} email{smtpSendResult.succeeded !== 1 ? "s" : ""} sent via SMTP
+                    {smtpSendResult.failed > 0 && ` · ${smtpSendResult.failed} failed`}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">Delivered from your mailbox to recipients' inboxes.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={handleReset} className="rounded-xl gap-1.5 flex-shrink-0">
+                  <UploadCloud className="h-3.5 w-3.5" /> New upload
+                </Button>
+              </div>
+            </div>
+
+            {/* Summary bar */}
+            <div className="px-6 py-4 grid grid-cols-3 gap-3">
+              <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                <div className="text-xl font-bold text-emerald-700">{smtpSendResult.succeeded}</div>
+                <div className="text-xs text-emerald-600 font-medium mt-0.5">Sent</div>
+              </div>
+              <div className="text-center p-3 rounded-xl bg-red-50 border border-red-100">
+                <div className="text-xl font-bold text-red-700">{smtpSendResult.failed}</div>
+                <div className="text-xs text-red-600 font-medium mt-0.5">Failed</div>
+              </div>
+              <div className="text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
+                <div className="text-xl font-bold text-slate-700">{smtpSendResult.total}</div>
+                <div className="text-xs text-slate-500 font-medium mt-0.5">Total</div>
+              </div>
+            </div>
+
+            {smtpSendResult.failed > 0 && (
+              <div className="px-6 pb-5 space-y-2">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Failed sends</p>
+                {smtpSendResult.results.filter(r => r.status === "failed").map((r, i) => (
+                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
+                    <XCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{r.email || "(no email)"}</p>
+                      <p className="text-xs text-red-600 mt-0.5">{r.error ?? "Unknown error"}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {smtpSendResult.succeeded > 0 && (
+              <div className="px-6 pb-5">
+                <details className="group">
+                  <summary className="text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1 hover:text-slate-700">
+                    <span className="group-open:hidden">▶</span><span className="hidden group-open:inline">▼</span>
+                    View sent emails ({smtpSendResult.succeeded})
+                  </summary>
+                  <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
+                    {smtpSendResult.results.filter(r => r.status === "success").map((r, i) => (
+                      <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-medium text-slate-700 truncate">{r.email}</p>
+                          <p className="text-xs text-slate-400 truncate">{r.subject}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
