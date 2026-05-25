@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2, CheckCircle2, XCircle, Server, Mail, User, Lock,
-  Wifi, Trash2, Save, FlaskConical, ChevronDown, ChevronUp,
+  Wifi, Trash2, Save, FlaskConical, ChevronDown, ChevronUp, FolderSync,
 } from "lucide-react";
 
 type Secure = "ssl" | "tls" | "none";
@@ -29,6 +29,24 @@ const PRESETS = [
   { name: "Gmail SMTP",      smtp: "smtp.gmail.com", smtpPort: "587", secure: "tls" as Secure, imap: "imap.gmail.com", imapPort: "993" },
   { name: "Namecheap Email", smtp: "mail.privateemail.com", smtpPort: "465", secure: "ssl" as Secure, imap: "mail.privateemail.com", imapPort: "993" },
 ];
+
+function StatusPill({
+  icon: Icon, label, active, inactiveLabel,
+}: {
+  icon: React.ElementType; label: string; active: boolean; inactiveLabel?: string;
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${
+      active
+        ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+        : "bg-slate-50 border-slate-200 text-slate-500"
+    }`}>
+      <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${active ? "bg-emerald-500" : "bg-slate-300"}`} />
+      <Icon className="h-3 w-3 flex-shrink-0" />
+      {active ? label : (inactiveLabel ?? label)}
+    </span>
+  );
+}
 
 function Field({
   label, icon: Icon, type = "text", value, onChange, placeholder, hint,
@@ -247,6 +265,29 @@ export default function MailboxSettings() {
           </Button>
         )}
       </div>
+
+      {/* Connection status indicators */}
+      {isConnected && (
+        <div className="flex flex-wrap gap-2">
+          <StatusPill
+            icon={Server}
+            label="SMTP Connected"
+            active={true}
+          />
+          <StatusPill
+            icon={Mail}
+            label="IMAP Connected"
+            active={!!form.imapHost}
+            inactiveLabel="IMAP Not Configured"
+          />
+          <StatusPill
+            icon={FolderSync}
+            label="Sent Folder Sync Active"
+            active={!!form.imapHost}
+            inactiveLabel="Sent Folder Sync Inactive"
+          />
+        </div>
+      )}
 
       {/* Provider presets */}
       <div className="space-y-2">
