@@ -9,6 +9,9 @@ import {
   Globe, Mail, Activity, Database,
   AlertCircle, ChevronDown, ChevronUp,
   Eye, EyeOff,
+  ToggleLeft, Sliders, Lock, HelpCircle, Download, Bell,
+  Coins, MailCheck, Trash2, MessageSquare, Send, Reply,
+  UserCheck, Zap, Scale, PlusCircle, MinusCircle, X,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,7 +41,18 @@ interface AnalyticsSummary {
 
 type SubTab =
   | "general" | "branding" | "smtp" | "ai"
-  | "users" | "billing" | "security" | "cms" | "analytics";
+  | "users" | "billing" | "security" | "cms" | "analytics"
+  | "providers" | "emailControls" | "planPerms" | "credits"
+  | "notifications" | "legal" | "support" | "features"
+  | "backup" | "superadmin";
+
+interface SupportTicket {
+  id: number; userEmail: string; userName: string | null;
+  subject: string; message: string; status: string; priority: string;
+  adminNote: string | null; assignedTo: string | null;
+  replies: { id: string; author: string; authorName: string; message: string; createdAt: string }[];
+  createdAt: string; updatedAt: string; resolvedAt: string | null;
+}
 
 // ─── Default values ───────────────────────────────────────────────────────────
 
@@ -95,6 +109,70 @@ const DEFAULTS: SettingsMap = {
   faqContent:      "",
   pricingContent:  "",
   contactContent:  "",
+  // Email Provider Management
+  gmailDraftsEnabled:  "true",
+  smtpSendingEnabled:  "true",
+  imapSyncEnabled:     "true",
+  providerGmail:       "true",
+  providerOutlook:     "true",
+  providerHostinger:   "true",
+  providerGoDaddy:     "true",
+  providerZoho:        "true",
+  providerNamecheap:   "true",
+  providerPrivateMail: "true",
+  // Global Email Controls
+  platformMaxEmailsPerHour: "500",
+  minDelaySecs:             "5",
+  spamScoreThreshold:       "7",
+  queueCooldownMins:        "5",
+  bounceRateThreshold:      "5",
+  // User Plan Permissions
+  planFreeMaxUploadsDay:       "3",
+  planProMaxUploadsDay:        "20",
+  planEnterpriseMaxUploadsDay: "100",
+  planFreeMaxContactsMonth:       "500",
+  planProMaxContactsMonth:        "5000",
+  planEnterpriseMaxContactsMonth: "50000",
+  planFreeSmtp:          "false",
+  planProSmtp:           "true",
+  planEnterpriseSmtp:    "true",
+  planFreeAi:            "false",
+  planProAi:             "true",
+  planEnterpriseAi:      "true",
+  planFreeBranding:      "false",
+  planProBranding:       "true",
+  planEnterpriseBranding:"true",
+  planFreePriority:      "false",
+  planProPriority:       "false",
+  planEnterprisePriority:"true",
+  // Credits System
+  freeTrialCredits: "50",
+  aiCreditCost:     "5",
+  emailCreditCost:  "1",
+  // Admin Notifications
+  adminNotificationEmail: "",
+  notifySmtpFailures:     "true",
+  notifyBouncedEmails:    "true",
+  notifyFailedPayments:   "true",
+  notifySpamComplaints:   "true",
+  notifyServerIssues:     "true",
+  // Legal CMS
+  privacyPolicy:    "",
+  termsOfService:   "",
+  refundPolicy:     "",
+  aboutPageContent: "",
+  // Feature Toggles
+  featureLandingPage:        "true",
+  featurePublicRegistration: "true",
+  featureAiWriter:           "true",
+  featureSmtpSending:        "true",
+  featureGmailDrafts:        "true",
+  featureQueueSystem:        "true",
+  featureAnalytics:          "true",
+  // Super Admin
+  superAdminEmail:         "",
+  auditAllActions:         "true",
+  preventAccidentalDelete: "true",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -292,16 +370,26 @@ function StatCard({ label, value, sub, color }: {
 
 // ─── SUB-TABS DEFINITION ─────────────────────────────────────────────────────
 
-const SUB_TABS: { id: SubTab; label: string; icon: React.ElementType }[] = [
-  { id: "general",   label: "General",   icon: Globe },
-  { id: "branding",  label: "Branding",  icon: Palette },
-  { id: "smtp",      label: "SMTP",      icon: Server },
-  { id: "ai",        label: "AI",        icon: Bot },
-  { id: "users",     label: "Users",     icon: Users },
-  { id: "billing",   label: "Billing",   icon: CreditCard },
-  { id: "security",  label: "Security",  icon: Shield },
-  { id: "cms",       label: "CMS",       icon: FileText },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
+const SUB_TABS: { id: SubTab; label: string; icon: React.ElementType; group?: string }[] = [
+  { id: "general",      label: "General",       icon: Globe,         group: "Platform" },
+  { id: "branding",     label: "Branding",      icon: Palette,       group: "Platform" },
+  { id: "features",     label: "Features",      icon: ToggleLeft,    group: "Platform" },
+  { id: "security",     label: "Security",      icon: Shield,        group: "Platform" },
+  { id: "superadmin",   label: "Super Admin",   icon: Lock,          group: "Platform" },
+  { id: "providers",    label: "Providers",     icon: MailCheck,     group: "Email" },
+  { id: "smtp",         label: "SMTP",          icon: Server,        group: "Email" },
+  { id: "emailControls",label: "Email Controls",icon: Sliders,       group: "Email" },
+  { id: "ai",           label: "AI",            icon: Bot,           group: "Email" },
+  { id: "users",        label: "Users",         icon: Users,         group: "Users & Plans" },
+  { id: "planPerms",    label: "Plan Perms",    icon: UserCheck,     group: "Users & Plans" },
+  { id: "billing",      label: "Billing",       icon: CreditCard,    group: "Users & Plans" },
+  { id: "credits",      label: "Credits",       icon: Coins,         group: "Users & Plans" },
+  { id: "notifications",label: "Notifications", icon: Bell,          group: "Admin" },
+  { id: "support",      label: "Support",       icon: HelpCircle,    group: "Admin" },
+  { id: "backup",       label: "Backup",        icon: Download,      group: "Admin" },
+  { id: "analytics",    label: "Analytics",     icon: BarChart3,     group: "Admin" },
+  { id: "cms",          label: "CMS",           icon: FileText,      group: "Content" },
+  { id: "legal",        label: "Legal",         icon: Scale,         group: "Content" },
 ];
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -317,6 +405,27 @@ export function AdminSettings() {
   const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+
+  // Support ticket state
+  const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
+  const [ticketReply, setTicketReply] = useState("");
+  const [ticketReplying, setTicketReplying] = useState(false);
+  const [ticketSearch, setTicketSearch] = useState("");
+  const [ticketStatusFilter, setTicketStatusFilter] = useState("all");
+
+  // Credits adjustment state
+  const [creditUsers, setCreditUsers] = useState<{ id: number; name: string; email: string; credits: number; plan: string }[]>([]);
+  const [creditUsersLoading, setCreditUsersLoading] = useState(false);
+  const [creditSearch, setCreditSearch] = useState("");
+  const [creditAmount, setCreditAmount] = useState("");
+  const [creditReason, setCreditReason] = useState("");
+  const [creditTargetId, setCreditTargetId] = useState<number | null>(null);
+  const [creditAdjusting, setCreditAdjusting] = useState(false);
+
+  // Backup/export state
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const set = (key: string, val: string) => setSettings(s => ({ ...s, [key]: val }));
 
@@ -357,8 +466,105 @@ export function AdminSettings() {
     finally { setAnalyticsLoading(false); }
   }, []);
 
+  const loadTickets = useCallback(async () => {
+    setTicketsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (ticketStatusFilter !== "all") params.set("status", ticketStatusFilter);
+      if (ticketSearch) params.set("search", ticketSearch);
+      const data = await apiFetch(`support?${params}`);
+      setTickets(data);
+    } catch { /* silent */ }
+    finally { setTicketsLoading(false); }
+  }, [ticketStatusFilter, ticketSearch]);
+
+  const loadCreditUsers = useCallback(async () => {
+    setCreditUsersLoading(true);
+    try {
+      const params = new URLSearchParams({ limit: "50" });
+      if (creditSearch) params.set("search", creditSearch);
+      const data = await apiFetch(`users?${params}`);
+      setCreditUsers(data.data ?? []);
+    } catch { /* silent */ }
+    finally { setCreditUsersLoading(false); }
+  }, [creditSearch]);
+
+  async function adjustCredits(userId: number, amount: number) {
+    if (!amount) { toast({ variant: "destructive", title: "Enter an amount" }); return; }
+    setCreditAdjusting(true);
+    try {
+      await apiFetch(`users/${userId}/credits`, {
+        method: "POST",
+        body: JSON.stringify({ amount, reason: creditReason }),
+      });
+      toast({ title: `Credits ${amount >= 0 ? "added" : "removed"}`, description: `${Math.abs(amount)} credits adjusted.` });
+      setCreditAmount(""); setCreditReason(""); setCreditTargetId(null);
+      loadCreditUsers();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed", description: err.message });
+    } finally { setCreditAdjusting(false); }
+  }
+
+  async function replyToTicket() {
+    if (!selectedTicket || !ticketReply.trim()) return;
+    setTicketReplying(true);
+    try {
+      const data = await apiFetch(`support/${selectedTicket.id}/reply`, {
+        method: "POST",
+        body: JSON.stringify({ message: ticketReply }),
+      });
+      setSelectedTicket(t => t ? { ...t, replies: [...t.replies, data.reply], status: t.status === "open" ? "in_progress" : t.status } : t);
+      setTicketReply("");
+      toast({ title: "Reply sent" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed", description: err.message });
+    } finally { setTicketReplying(false); }
+  }
+
+  async function updateTicketStatus(id: number, status: string) {
+    try {
+      await apiFetch(`support/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      setTickets(ts => ts.map(t => t.id === id ? { ...t, status } : t));
+      if (selectedTicket?.id === id) setSelectedTicket(t => t ? { ...t, status } : t);
+      toast({ title: "Ticket updated" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed", description: err.message });
+    }
+  }
+
+  async function deleteTicket(id: number) {
+    try {
+      await apiFetch(`support/${id}`, { method: "DELETE" });
+      setTickets(ts => ts.filter(t => t.id !== id));
+      if (selectedTicket?.id === id) setSelectedTicket(null);
+      toast({ title: "Ticket deleted" });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Failed", description: err.message });
+    }
+  }
+
+  async function doExport(type: string) {
+    setExporting(type);
+    try {
+      const res = await fetch(`/api/admin/export/${type}`, {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${type}_export.${type === "settings" ? "json" : "csv"}`;
+      a.click(); URL.revokeObjectURL(url);
+      toast({ title: "Export ready", description: `${type} exported successfully.` });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Export failed", description: err.message });
+    } finally { setExporting(null); }
+  }
+
   useEffect(() => { loadSettings(); }, [loadSettings]);
   useEffect(() => { if (activeTab === "analytics") loadAnalytics(); }, [activeTab, loadAnalytics]);
+  useEffect(() => { if (activeTab === "support") loadTickets(); }, [activeTab, loadTickets]);
+  useEffect(() => { if (activeTab === "credits") loadCreditUsers(); }, [activeTab, loadCreditUsers]);
 
   async function saveSection(keys: string[]) {
     setSaving(true);
@@ -416,24 +622,34 @@ export function AdminSettings() {
 
       <div className="flex gap-5">
         {/* Desktop sidebar nav */}
-        <nav className="hidden lg:flex flex-col gap-0.5 flex-shrink-0 w-44">
-          {SUB_TABS.map(t => (
-            <button key={t.id} type="button"
-              onClick={() => setActiveTab(t.id)}
-              className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
-                activeTab === t.id
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              }`}
-            >
-              <t.icon className="h-4 w-4 flex-shrink-0" />
-              {t.label}
-            </button>
+        <nav className="hidden lg:flex flex-col gap-0.5 flex-shrink-0 w-44 overflow-y-auto max-h-[calc(100vh-200px)]">
+          {Object.entries(SUB_TABS.reduce((acc, t) => {
+            const g = t.group ?? "Other";
+            if (!acc[g]) acc[g] = [];
+            acc[g].push(t);
+            return acc;
+          }, {} as Record<string, typeof SUB_TABS>)).map(([group, tabs]) => (
+            <div key={group} className="mb-1">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-3 pt-2 pb-1">{group}</p>
+              {tabs.map(t => (
+                <button key={t.id} type="button"
+                  onClick={() => setActiveTab(t.id)}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-colors text-left ${
+                    activeTab === t.id
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  }`}
+                >
+                  <t.icon className="h-3.5 w-3.5 flex-shrink-0" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 
         {/* Panel */}
-        <div className="flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden">
+        <div className="flex-1 min-w-0 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 overflow-hidden overflow-y-auto max-h-[calc(100vh-200px)]">
 
           {/* ── 1. GENERAL ────────────────────────────────────────────────── */}
           {activeTab === "general" && (
@@ -1013,6 +1229,570 @@ export function AdminSettings() {
                   <p className="text-slate-400 text-sm">Could not load analytics. Try refreshing.</p>
                 </div>
               )}
+            </div>
+          )}
+
+
+          {/* ── 10. EMAIL PROVIDER MANAGEMENT ──────────────────────────────── */}
+          {activeTab === "providers" && (
+            <div className="space-y-5">
+              <SectionHeader icon={MailCheck} title="Email Provider Management" color="bg-emerald-50 text-emerald-600"
+                desc="Enable or disable email sending methods and specific provider integrations." />
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Sending Methods</p>
+                <Toggle label="Gmail Drafts" desc="Allow users to create Gmail drafts via OAuth."
+                  settingsKey="gmailDraftsEnabled" settings={settings} onChange={set} />
+                <Toggle label="SMTP Sending" desc="Allow users to send via custom SMTP mailboxes."
+                  settingsKey="smtpSendingEnabled" settings={settings} onChange={set} />
+                <Toggle label="IMAP Sync" desc="Allow users to sync inbox via IMAP."
+                  settingsKey="imapSyncEnabled" settings={settings} onChange={set} />
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Allowed Providers</p>
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {[
+                    { key: "providerGmail",       label: "Gmail",        icon: "G" },
+                    { key: "providerOutlook",     label: "Outlook",      icon: "O" },
+                    { key: "providerHostinger",   label: "Hostinger",    icon: "H" },
+                    { key: "providerGoDaddy",     label: "GoDaddy",      icon: "GD" },
+                    { key: "providerZoho",        label: "Zoho",         icon: "Z" },
+                    { key: "providerNamecheap",   label: "Namecheap",    icon: "N" },
+                    { key: "providerPrivateMail", label: "Private Mail", icon: "PM" },
+                  ].map(p => {
+                    const on = settings[p.key] === "true";
+                    return (
+                      <div key={p.key} className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${on ? "bg-emerald-50 border-emerald-100" : "bg-slate-50 border-slate-100"}`}>
+                        <div className="flex items-center gap-2">
+                          <span className={`h-7 w-7 rounded-lg text-xs font-bold flex items-center justify-center flex-shrink-0 ${on ? "bg-emerald-200 text-emerald-800" : "bg-slate-200 text-slate-500"}`}>{p.icon}</span>
+                          <span className="text-sm font-medium text-slate-800">{p.label}</span>
+                        </div>
+                        <button type="button" onClick={() => set(p.key, on ? "false" : "true")}
+                          className={`relative inline-flex h-5 w-9 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${on ? "bg-emerald-500" : "bg-slate-200"}`}
+                          role="switch" aria-checked={on}>
+                          <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${on ? "translate-x-4" : "translate-x-0"}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "gmailDraftsEnabled", "smtpSendingEnabled", "imapSyncEnabled",
+                "providerGmail", "providerOutlook", "providerHostinger",
+                "providerGoDaddy", "providerZoho", "providerNamecheap", "providerPrivateMail",
+              ])} label="Save Provider Settings" />
+            </div>
+          )}
+
+          {/* ── 11. GLOBAL EMAIL CONTROLS ───────────────────────────────────── */}
+          {activeTab === "emailControls" && (
+            <div className="space-y-5">
+              <SectionHeader icon={Sliders} title="Global Email Controls" color="bg-orange-50 text-orange-600"
+                desc="Platform-wide limits, spam protection thresholds, and queue cooldown timers." />
+
+              <div className="grid sm:grid-cols-2 gap-5">
+                <NumberSlider label="Max Emails / Hour (Platform-wide)" desc="Hard cap across all users."
+                  settingsKey="platformMaxEmailsPerHour" settings={settings} onChange={set}
+                  min={10} max={5000} step={10} unit="/hr" />
+                <NumberSlider label="Max Emails / Day (Platform-wide)"
+                  settingsKey="maxEmailsPerDay" settings={settings} onChange={set}
+                  min={100} max={50000} step={100} unit="/day" />
+                <NumberSlider label="Minimum Delay Between Sends" desc="Enforced for every user."
+                  settingsKey="minDelaySecs" settings={settings} onChange={set}
+                  min={1} max={120} unit="sec" />
+                <NumberSlider label="Queue Cooldown Timer" desc="Minutes queue pauses after hitting rate limit."
+                  settingsKey="queueCooldownMins" settings={settings} onChange={set}
+                  min={1} max={60} unit="min" />
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Spam Protection</p>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="text-sm font-medium text-slate-700">Spam Score Threshold</label>
+                      <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg">{settings.spamScoreThreshold ?? "7"} / 10</span>
+                    </div>
+                    <p className="text-xs text-slate-400">Emails above this score are blocked.</p>
+                    <input type="range" min={1} max={10} step={1}
+                      value={Number(settings.spamScoreThreshold ?? 7)}
+                      onChange={e => set("spamScoreThreshold", e.target.value)}
+                      className="w-full h-2 bg-slate-200 rounded-full appearance-none cursor-pointer accent-orange-500" />
+                    <div className="flex justify-between text-xs text-slate-400"><span>1 (strict)</span><span>10 (lenient)</span></div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between">
+                      <label className="text-sm font-medium text-slate-700">Bounce Rate Threshold</label>
+                      <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded-lg">{settings.bounceRateThreshold ?? "5"}%</span>
+                    </div>
+                    <p className="text-xs text-slate-400">Auto-suspend user when their bounce rate exceeds this.</p>
+                    <input type="range" min={1} max={30} step={1}
+                      value={Number(settings.bounceRateThreshold ?? 5)}
+                      onChange={e => set("bounceRateThreshold", e.target.value)}
+                      className="w-full h-2 bg-slate-200 rounded-full appearance-none cursor-pointer accent-orange-500" />
+                    <div className="flex justify-between text-xs text-slate-400"><span>1%</span><span>30%</span></div>
+                  </div>
+                </div>
+              </div>
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "platformMaxEmailsPerHour", "maxEmailsPerDay", "minDelaySecs",
+                "queueCooldownMins", "spamScoreThreshold", "bounceRateThreshold",
+              ])} label="Save Email Controls" />
+            </div>
+          )}
+
+          {/* ── 12. USER PLAN PERMISSIONS ───────────────────────────────────── */}
+          {activeTab === "planPerms" && (
+            <div className="space-y-5">
+              <SectionHeader icon={UserCheck} title="User Plan Permissions" color="bg-teal-50 text-teal-600"
+                desc="Control what each plan tier can access. Changes apply globally." />
+
+              {(["Free", "Pro", "Enterprise"] as const).map(tier => {
+                const t = tier.toLowerCase();
+                const color = tier === "Free" ? "bg-slate-50 border-slate-200" : tier === "Pro" ? "bg-blue-50 border-blue-200" : "bg-purple-50 border-purple-200";
+                const badge = tier === "Free" ? "bg-slate-200 text-slate-700" : tier === "Pro" ? "bg-blue-200 text-blue-800" : "bg-purple-200 text-purple-800";
+                return (
+                  <div key={tier} className={`rounded-2xl border p-4 space-y-4 ${color}`}>
+                    <div className="flex items-center justify-between">
+                      <span className={`px-3 py-1 rounded-full text-xs font-bold ${badge}`}>{tier} Plan</span>
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Max Uploads / Day</label>
+                        <Input type="number" value={settings[`plan${tier}MaxUploadsDay`] ?? "3"}
+                          onChange={e => set(`plan${tier}MaxUploadsDay`, e.target.value)}
+                          className="h-8 rounded-lg text-sm" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-slate-500 uppercase">Max Contacts / Month</label>
+                        <Input type="number" value={settings[`plan${tier}MaxContactsMonth`] ?? "500"}
+                          onChange={e => set(`plan${tier}MaxContactsMonth`, e.target.value)}
+                          className="h-8 rounded-lg text-sm" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {[
+                        { key: `plan${tier}Smtp`,     label: "SMTP Access" },
+                        { key: `plan${tier}Ai`,       label: "AI Writer" },
+                        { key: `plan${tier}Branding`, label: "Custom Branding" },
+                        { key: `plan${tier}Priority`, label: "Priority Sending" },
+                      ].map(p => {
+                        const on = settings[p.key] === "true";
+                        return (
+                          <button key={p.key} type="button"
+                            onClick={() => set(p.key, on ? "false" : "true")}
+                            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-colors ${on ? "border-emerald-400 bg-emerald-100 text-emerald-800" : "border-slate-200 bg-white text-slate-500"}`}>
+                            {on ? <CheckCircle2 className="h-3 w-3" /> : <X className="h-3 w-3" />}
+                            {p.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "planFreeMaxUploadsDay", "planProMaxUploadsDay", "planEnterpriseMaxUploadsDay",
+                "planFreeMaxContactsMonth", "planProMaxContactsMonth", "planEnterpriseMaxContactsMonth",
+                "planFreeSmtp", "planProSmtp", "planEnterpriseSmtp",
+                "planFreeAi", "planProAi", "planEnterpriseAi",
+                "planFreeBranding", "planProBranding", "planEnterpriseBranding",
+                "planFreePriority", "planProPriority", "planEnterprisePriority",
+              ])} label="Save Plan Permissions" />
+            </div>
+          )}
+
+          {/* ── 13. CREDITS SYSTEM ─────────────────────────────────────────── */}
+          {activeTab === "credits" && (
+            <div className="space-y-5">
+              <SectionHeader icon={Coins} title="Credits System" color="bg-amber-50 text-amber-600"
+                desc="Set credit costs, free trial amounts, and manually adjust user balances." />
+
+              <div className="grid sm:grid-cols-3 gap-4">
+                <Field label="Free Trial Credits" settingsKey="freeTrialCredits" settings={settings} onChange={set}
+                  type="number" mono hint="Credits given to new users on signup." />
+                <Field label="AI Credit Cost (per call)" settingsKey="aiCreditCost" settings={settings} onChange={set}
+                  type="number" mono hint="Credits deducted per AI email generation." />
+                <Field label="Email Send Cost (per email)" settingsKey="emailCreditCost" settings={settings} onChange={set}
+                  type="number" mono hint="Credits deducted per sent email." />
+              </div>
+
+              <SaveBar saving={saving} onSave={() => saveSection(["freeTrialCredits", "aiCreditCost", "emailCreditCost"])}
+                label="Save Credit Costs" />
+
+              <div className="border-t border-slate-100 pt-5 space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Manually Adjust User Credits</p>
+                <div className="flex gap-2">
+                  <Input placeholder="Search user..." value={creditSearch}
+                    onChange={e => setCreditSearch(e.target.value)}
+                    className="rounded-xl flex-1" />
+                  <Button variant="outline" size="sm" onClick={loadCreditUsers} className="rounded-xl gap-1.5 shrink-0">
+                    <RefreshCw className={`h-3.5 w-3.5 ${creditUsersLoading ? "animate-spin" : ""}`} />Search
+                  </Button>
+                </div>
+
+                {creditUsersLoading ? (
+                  <div className="space-y-2">{Array(3).fill(0).map((_, i) => <Skeleton key={i} className="h-14 rounded-xl" />)}</div>
+                ) : (
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {creditUsers.map(u => (
+                      <div key={u.id} className={`flex items-center justify-between p-3 rounded-xl border transition-colors ${creditTargetId === u.id ? "border-amber-400 bg-amber-50" : "border-slate-100 bg-slate-50 hover:bg-slate-100"}`}>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-slate-800 truncate">{u.name}</p>
+                          <p className="text-xs text-slate-500">{u.email} · <span className="font-bold text-amber-600">{u.credits} credits</span></p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => setCreditTargetId(creditTargetId === u.id ? null : u.id)}
+                          className="rounded-xl text-xs ml-2 shrink-0">
+                          {creditTargetId === u.id ? "Cancel" : "Adjust"}
+                        </Button>
+                      </div>
+                    ))}
+                    {creditUsers.length === 0 && <p className="text-sm text-slate-400 text-center py-6">No users found. Search to find a user.</p>}
+                  </div>
+                )}
+
+                {creditTargetId !== null && (
+                  <div className="p-4 rounded-xl border border-amber-200 bg-amber-50 space-y-3">
+                    <p className="text-sm font-semibold text-amber-900">
+                      Adjusting credits for: {creditUsers.find(u => u.id === creditTargetId)?.email}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-slate-500">Amount (use - to remove)</label>
+                        <Input type="number" value={creditAmount} onChange={e => setCreditAmount(e.target.value)}
+                          placeholder="e.g. 100 or -50" className="rounded-xl" />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs font-semibold text-slate-500">Reason (optional)</label>
+                        <Input value={creditReason} onChange={e => setCreditReason(e.target.value)}
+                          placeholder="Bonus, refund, etc." className="rounded-xl" />
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button onClick={() => adjustCredits(creditTargetId!, parseInt(creditAmount))} disabled={creditAdjusting}
+                        className="flex-1 rounded-xl gap-1.5 bg-amber-600 hover:bg-amber-700">
+                        {creditAdjusting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Coins className="h-4 w-4" />}
+                        Apply Adjustment
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── 14. ADMIN NOTIFICATIONS ────────────────────────────────────── */}
+          {activeTab === "notifications" && (
+            <div className="space-y-5">
+              <SectionHeader icon={Bell} title="Admin Notifications" color="bg-yellow-50 text-yellow-600"
+                desc="Configure which alerts are sent to the admin notification email." />
+
+              <Field label="Admin Notification Email" settingsKey="adminNotificationEmail"
+                settings={settings} onChange={set} type="email"
+                placeholder="admin@yourdomain.com"
+                hint="All alerts are sent to this address." />
+
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Alert Types</p>
+                {[
+                  { key: "notifySmtpFailures",   label: "SMTP Failures",    desc: "When an SMTP send permanently fails after all retries." },
+                  { key: "notifyBouncedEmails",  label: "Bounced Emails",   desc: "When email bounce rate exceeds the configured threshold." },
+                  { key: "notifyFailedPayments", label: "Failed Payments",  desc: "When a Stripe payment or subscription charge fails." },
+                  { key: "notifySpamComplaints", label: "Spam Complaints",  desc: "When a recipient marks an email as spam." },
+                  { key: "notifyServerIssues",   label: "Server Issues",    desc: "Critical system errors, database failures, or queue crashes." },
+                ].map(n => (
+                  <Toggle key={n.key} label={n.label} desc={n.desc}
+                    settingsKey={n.key} settings={settings} onChange={set} />
+                ))}
+              </div>
+
+              <div className="p-4 rounded-xl bg-yellow-50 border border-yellow-100">
+                <p className="text-xs font-semibold text-yellow-800 mb-2">Notification Summary</p>
+                <div className="flex flex-wrap gap-2">
+                  {["notifySmtpFailures", "notifyBouncedEmails", "notifyFailedPayments", "notifySpamComplaints", "notifyServerIssues"].map(k => (
+                    <span key={k} className={`px-2 py-0.5 rounded-full text-xs font-semibold ${settings[k] === "true" ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+                      {k.replace("notify", "").replace(/([A-Z])/g, " $1").trim()}: {settings[k] === "true" ? "ON" : "OFF"}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "adminNotificationEmail", "notifySmtpFailures", "notifyBouncedEmails",
+                "notifyFailedPayments", "notifySpamComplaints", "notifyServerIssues",
+              ])} label="Save Notification Settings" />
+            </div>
+          )}
+
+          {/* ── 15. TRUST & LEGAL CMS ──────────────────────────────────────── */}
+          {activeTab === "legal" && (
+            <div className="space-y-5">
+              <SectionHeader icon={Scale} title="Trust & Legal CMS" color="bg-slate-50 text-slate-600"
+                desc="Edit the content of your legal and public-facing pages. All changes are live immediately." />
+
+              {[
+                { key: "privacyPolicy",   label: "Privacy Policy",  placeholder: "## Privacy Policy\n\nLast updated: ...\n\nWe collect..." },
+                { key: "termsOfService",  label: "Terms of Service", placeholder: "## Terms of Service\n\nBy using BrokerMail AI..." },
+                { key: "refundPolicy",    label: "Refund Policy",   placeholder: "## Refund Policy\n\nRefunds are available within 14 days..." },
+                { key: "aboutPageContent",label: "About Page",      placeholder: "## About BrokerMail AI\n\nWe built this platform to help auto transport brokers..." },
+                { key: "contactContent",  label: "Contact Page",    placeholder: "Have questions? Reach us at support@brokermail.ai" },
+              ].map(p => (
+                <TextareaField key={p.key} label={p.label} settingsKey={p.key}
+                  settings={settings} onChange={set} rows={6} placeholder={p.placeholder}
+                  hint="Supports Markdown. Leave blank to use the default page." />
+              ))}
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "privacyPolicy", "termsOfService", "refundPolicy", "aboutPageContent", "contactContent",
+              ])} label="Save Legal Pages" />
+            </div>
+          )}
+
+          {/* ── 16. SUPPORT SYSTEM ─────────────────────────────────────────── */}
+          {activeTab === "support" && (
+            <div className="space-y-4">
+              <SectionHeader icon={HelpCircle} title="Support Inbox" color="bg-sky-50 text-sky-600"
+                desc="View and reply to user support tickets." />
+
+              <div className="flex gap-2 flex-wrap">
+                <Input placeholder="Search tickets..." value={ticketSearch}
+                  onChange={e => setTicketSearch(e.target.value)}
+                  className="rounded-xl flex-1 min-w-0" />
+                <select value={ticketStatusFilter} onChange={e => setTicketStatusFilter(e.target.value)}
+                  className="h-10 px-3 rounded-xl border border-slate-200 text-sm bg-white text-slate-700 shrink-0">
+                  {["all", "open", "in_progress", "resolved", "closed"].map(s => (
+                    <option key={s} value={s}>{s === "all" ? "All Status" : s.replace("_", " ")}</option>
+                  ))}
+                </select>
+                <Button variant="outline" size="sm" onClick={loadTickets} className="rounded-xl gap-1.5 shrink-0">
+                  <RefreshCw className={`h-3.5 w-3.5 ${ticketsLoading ? "animate-spin" : ""}`} />Refresh
+                </Button>
+              </div>
+
+              <div className="grid lg:grid-cols-2 gap-4">
+                {/* Ticket list */}
+                <div className="space-y-2">
+                  {ticketsLoading ? (
+                    Array(4).fill(0).map((_, i) => <Skeleton key={i} className="h-16 rounded-xl" />)
+                  ) : tickets.length === 0 ? (
+                    <div className="py-12 text-center">
+                      <MessageSquare className="h-10 w-10 mx-auto text-slate-200 mb-2" />
+                      <p className="text-slate-400 text-sm">No tickets found.</p>
+                    </div>
+                  ) : tickets.map(t => {
+                    const priorityColor = t.priority === "urgent" ? "bg-red-100 text-red-700" : t.priority === "high" ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-600";
+                    const statusColor = t.status === "open" ? "bg-sky-100 text-sky-700" : t.status === "in_progress" ? "bg-amber-100 text-amber-700" : t.status === "resolved" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-500";
+                    return (
+                      <div key={t.id}
+                        onClick={() => setSelectedTicket(t)}
+                        className={`p-3 rounded-xl border cursor-pointer transition-colors ${selectedTicket?.id === t.id ? "border-sky-400 bg-sky-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800 truncate">{t.subject}</p>
+                            <p className="text-xs text-slate-500 truncate">{t.userEmail}</p>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${statusColor}`}>{t.status.replace("_", " ")}</span>
+                            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${priorityColor}`}>{t.priority}</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-slate-400 mt-1">{new Date(t.createdAt).toLocaleDateString()}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Ticket detail */}
+                {selectedTicket ? (
+                  <div className="border border-slate-200 rounded-xl p-4 space-y-3">
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <p className="font-semibold text-slate-900 text-sm">{selectedTicket.subject}</p>
+                        <p className="text-xs text-slate-500">{selectedTicket.userName ?? selectedTicket.userEmail}</p>
+                      </div>
+                      <div className="flex gap-1">
+                        <select value={selectedTicket.status}
+                          onChange={e => updateTicketStatus(selectedTicket.id, e.target.value)}
+                          className="h-7 px-2 rounded-lg border border-slate-200 text-xs bg-white">
+                          {["open", "in_progress", "resolved", "closed"].map(s => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+                        </select>
+                        <button onClick={() => deleteTicket(selectedTicket.id)}
+                          className="h-7 w-7 flex items-center justify-center rounded-lg border border-red-200 text-red-400 hover:bg-red-50">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 rounded-xl p-3 text-sm text-slate-700 max-h-24 overflow-y-auto">
+                      {selectedTicket.message}
+                    </div>
+
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {selectedTicket.replies.map(r => (
+                        <div key={r.id} className={`p-2.5 rounded-xl text-xs ${r.author === "admin" ? "bg-blue-50 border border-blue-100" : "bg-slate-50 border border-slate-100"}`}>
+                          <p className="font-semibold text-slate-700 mb-1">{r.authorName}</p>
+                          <p className="text-slate-600">{r.message}</p>
+                          <p className="text-slate-400 mt-1">{new Date(r.createdAt).toLocaleString()}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2">
+                      <textarea value={ticketReply} onChange={e => setTicketReply(e.target.value)}
+                        placeholder="Type a reply..." rows={2}
+                        className="flex-1 px-3 py-2 rounded-xl border border-slate-200 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-sky-500" />
+                      <Button onClick={replyToTicket} disabled={ticketReplying || !ticketReply.trim()}
+                        className="rounded-xl gap-1.5 bg-sky-600 hover:bg-sky-700 self-end">
+                        {ticketReplying ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="border border-dashed border-slate-200 rounded-xl flex items-center justify-center py-12">
+                    <div className="text-center">
+                      <Reply className="h-8 w-8 mx-auto text-slate-200 mb-2" />
+                      <p className="text-sm text-slate-400">Select a ticket to view &amp; reply</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── 17. FEATURE TOGGLES ────────────────────────────────────────── */}
+          {activeTab === "features" && (
+            <div className="space-y-5">
+              <SectionHeader icon={ToggleLeft} title="Feature Toggles" color="bg-violet-50 text-violet-600"
+                desc="Enable or disable major platform features without code changes." />
+
+              <div className="space-y-3">
+                {[
+                  { key: "featureLandingPage",        label: "Landing Page",          desc: "Public marketing homepage is visible to unauthenticated visitors.", danger: false },
+                  { key: "featurePublicRegistration",  label: "Public Registration",   desc: "Allow new users to register. Disable to close signups.", danger: true },
+                  { key: "featureAiWriter",            label: "AI Email Writer",       desc: "Users can generate personalized emails with AI.", danger: false },
+                  { key: "featureSmtpSending",         label: "SMTP Sending",          desc: "Users can send emails via SMTP mailboxes.", danger: false },
+                  { key: "featureGmailDrafts",         label: "Gmail Drafts",          desc: "Users can create Gmail drafts via OAuth.", danger: false },
+                  { key: "featureQueueSystem",         label: "Queue System",          desc: "Background email queue processor. Disable to halt all sending.", danger: true },
+                  { key: "featureAnalytics",           label: "User Analytics",        desc: "Users can see their email open/click analytics.", danger: false },
+                ].map(f => (
+                  <Toggle key={f.key} label={f.label} desc={f.desc} danger={f.danger}
+                    settingsKey={f.key} settings={settings} onChange={set} />
+                ))}
+              </div>
+
+              <div className="p-4 rounded-xl bg-violet-50 border border-violet-100">
+                <p className="text-xs font-semibold text-violet-800 mb-2">Active Features</p>
+                <div className="flex flex-wrap gap-2">
+                  {["featureLandingPage", "featurePublicRegistration", "featureAiWriter",
+                    "featureSmtpSending", "featureGmailDrafts", "featureQueueSystem", "featureAnalytics"].map(k => {
+                    const on = settings[k] === "true";
+                    return (
+                      <span key={k} className={`px-2 py-0.5 rounded-full text-xs font-semibold ${on ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-600"}`}>
+                        {k.replace("feature", "").replace(/([A-Z])/g, " $1").trim()}: {on ? "ON" : "OFF"}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "featureLandingPage", "featurePublicRegistration", "featureAiWriter",
+                "featureSmtpSending", "featureGmailDrafts", "featureQueueSystem", "featureAnalytics",
+              ])} label="Save Feature Toggles" />
+            </div>
+          )}
+
+          {/* ── 18. BACKUP & EXPORT ────────────────────────────────────────── */}
+          {activeTab === "backup" && (
+            <div className="space-y-5">
+              <SectionHeader icon={Download} title="Backup & Export" color="bg-green-50 text-green-600"
+                desc="Download exports of your platform data as CSV or JSON files." />
+
+              <div className="grid sm:grid-cols-2 gap-4">
+                {[
+                  { type: "users",     label: "Export Users",     desc: "All user accounts with plan, credits, and status. CSV format.", icon: Users },
+                  { type: "campaigns", label: "Export Campaigns", desc: "All campaigns with status and metadata. CSV format.", icon: Mail },
+                  { type: "settings",  label: "Export Settings",  desc: "All current platform settings snapshot. JSON format.", icon: Database },
+                ].map(e => (
+                  <div key={e.type} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-green-100 flex items-center justify-center">
+                        <e.icon className="h-5 w-5 text-green-700" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900 text-sm">{e.label}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{e.desc}</p>
+                      </div>
+                    </div>
+                    <Button variant="outline" className="w-full rounded-xl gap-2"
+                      disabled={exporting === e.type}
+                      onClick={() => doExport(e.type)}>
+                      {exporting === e.type ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {exporting === e.type ? "Exporting..." : `Download ${e.label.split(" ")[1]}`}
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
+                <p className="text-xs font-semibold text-blue-800 mb-1">Database Backup</p>
+                <p className="text-xs text-blue-700">
+                  For full database backups, use your Replit PostgreSQL dashboard or connect with pg_dump.
+                  Exports above are for platform-level data portability.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* ── 19. SUPER ADMIN PROTECTION ─────────────────────────────────── */}
+          {activeTab === "superadmin" && (
+            <div className="space-y-5">
+              <SectionHeader icon={Lock} title="Super Admin Protection" color="bg-red-50 text-red-600"
+                desc="Role hierarchy, deletion protection, and audit trail configuration." />
+
+              <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200">
+                <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0" />
+                <p className="text-sm text-red-800">Changes here affect core admin access controls. Proceed with caution.</p>
+              </div>
+
+              <Field label="Super Admin Email" settingsKey="superAdminEmail"
+                settings={settings} onChange={set} type="email"
+                placeholder="superadmin@yourdomain.com"
+                hint="This account cannot be deleted or demoted by other admins." />
+
+              <div className="space-y-3">
+                <Toggle label="Prevent Accidental Deletion" danger
+                  desc="Blocks admin accounts from deleting themselves or the super admin account."
+                  settingsKey="preventAccidentalDelete" settings={settings} onChange={set} />
+                <Toggle label="Full Audit Logging"
+                  desc="Log all admin actions to the system log with full detail including IP and timestamps."
+                  settingsKey="auditAllActions" settings={settings} onChange={set} />
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-100 space-y-2">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Role Hierarchy</p>
+                <div className="space-y-1">
+                  {[
+                    { role: "Super Admin", desc: "Full access, cannot be deleted or demoted.", badge: "bg-red-100 text-red-700" },
+                    { role: "Admin",       desc: "Full platform management. Cannot touch super admin.", badge: "bg-amber-100 text-amber-700" },
+                    { role: "User",        desc: "Standard user access. No admin capabilities.", badge: "bg-slate-100 text-slate-600" },
+                  ].map(r => (
+                    <div key={r.role} className="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${r.badge}`}>{r.role}</span>
+                      <p className="text-xs text-slate-500">{r.desc}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <SaveBar saving={saving} onSave={() => saveSection([
+                "superAdminEmail", "preventAccidentalDelete", "auditAllActions",
+              ])} label="Save Super Admin Settings" />
             </div>
           )}
 

@@ -2,9 +2,9 @@ import { Router, type IRouter } from "express";
 import {
   db, usersTable, campaignsTable, leadsTable, draftsTable,
   systemLogsTable, mailboxesTable, adminSettingsTable, emailQueueTable,
-  plansTable, subscriptionsTable, planRequestsTable,
+  plansTable, subscriptionsTable, planRequestsTable, supportTicketsTable,
 } from "@workspace/db";
-import { count, desc, sql, eq, gte, and, or, ilike, ne } from "drizzle-orm";
+import { count, desc, sql, eq, gte, and, or, ilike } from "drizzle-orm";
 import { requireAdmin } from "../lib/auth";
 
 const router: IRouter = Router();
@@ -321,6 +321,70 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   faqContent:     "",
   pricingContent: "",
   contactContent: "",
+  // Email Provider Management
+  gmailDraftsEnabled:       "true",
+  smtpSendingEnabled:       "true",
+  imapSyncEnabled:          "true",
+  providerGmail:            "true",
+  providerOutlook:          "true",
+  providerHostinger:        "true",
+  providerGoDaddy:          "true",
+  providerZoho:             "true",
+  providerNamecheap:        "true",
+  providerPrivateMail:      "true",
+  // Global Email Controls
+  platformMaxEmailsPerHour: "500",
+  minDelaySecs:             "5",
+  spamScoreThreshold:       "7",
+  queueCooldownMins:        "5",
+  bounceRateThreshold:      "5",
+  // User Plan Permissions
+  planFreeMaxUploadsDay:       "3",
+  planProMaxUploadsDay:        "20",
+  planEnterpriseMaxUploadsDay: "100",
+  planFreeMaxContactsMonth:    "500",
+  planProMaxContactsMonth:     "5000",
+  planEnterpriseMaxContactsMonth: "50000",
+  planFreeSmtp:                "false",
+  planProSmtp:                 "true",
+  planEnterpriseSmtp:          "true",
+  planFreeAi:                  "false",
+  planProAi:                   "true",
+  planEnterpriseAi:            "true",
+  planFreeBranding:            "false",
+  planProBranding:             "true",
+  planEnterpriseBranding:      "true",
+  planFreePriority:            "false",
+  planProPriority:             "false",
+  planEnterprisePriority:      "true",
+  // Credits System
+  freeTrialCredits:  "50",
+  aiCreditCost:      "5",
+  emailCreditCost:   "1",
+  // Admin Notifications
+  adminNotificationEmail: "",
+  notifySmtpFailures:     "true",
+  notifyBouncedEmails:    "true",
+  notifyFailedPayments:   "true",
+  notifySpamComplaints:   "true",
+  notifyServerIssues:     "true",
+  // Legal CMS
+  privacyPolicy:    "",
+  termsOfService:   "",
+  refundPolicy:     "",
+  aboutPageContent: "",
+  // Feature Toggles
+  featureLandingPage:        "true",
+  featurePublicRegistration: "true",
+  featureAiWriter:           "true",
+  featureSmtpSending:        "true",
+  featureGmailDrafts:        "true",
+  featureQueueSystem:        "true",
+  featureAnalytics:          "true",
+  // Super Admin Protection
+  superAdminEmail:        "",
+  auditAllActions:        "true",
+  preventAccidentalDelete: "true",
 };
 
 router.get("/admin/settings", requireAdmin, async (_req, res): Promise<void> => {
@@ -515,6 +579,221 @@ router.post("/admin/plan-requests/:id/reject", requireAdmin, async (req, res): P
 });
 
 // ─── Assign plan directly to a user ───────────────────────────────────────────
+
+// ─── Credits: Adjust credits for a user ──────────────────────────────────────
+
+router.post("/admin/users/:id/credits", requireAdmin, async (req, res): Promise<void> => {
+  const targetId = parseInt(req.params.id, 10);
+  const admin    = req.user!;
+  const { amount, reason } = req.body as { amount: number; reason?: string };
+
+  if (typeof amount !== "number" || isNaN(amount)) {
+    res.status(400).json({ error: "amount must be a number" });
+    return;
+  }
+
+  const [user] = await db.select({ id: usersTable.id, credits: usersTable.credits }).from(usersTable).where(eq(usersTable.id, targetId));
+  if (!user) { res.status(404).json({ error: "User not found." }); return; }
+
+  const newCredits = Math.max(0, user.credits + amount);
+  await db.update(usersTable).set({ credits: newCredits, updatedAt: new Date() }).where(eq(usersTable.id, targetId));
+
+  await db.insert(systemLogsTable).values({
+    userId:      admin.id,
+    type:        "credit_adjustment",
+    severity:    "info",
+    description: `Admin ${amount >= 0 ? "added" : "removed"} ${Math.abs(amount)} credits ${amount >= 0 ? "to" : "from"} user #${targetId}. New balance: ${newCredits}. Reason: ${reason ?? "—"}`,
+  });
+
+  res.json({ ok: true, newCredits });
+});
+
+// ─── Credits: Credit history for a user ──────────────────────────────────────
+
+router.get("/admin/users/:id/credit-history", requireAdmin, async (req, res): Promise<void> => {
+  const targetId = parseInt(req.params.id, 10);
+  const logs = await db.select().from(systemLogsTable)
+    .where(and(eq(systemLogsTable.userId, targetId), ilike(systemLogsTable.type, "credit_adjustment")))
+    .orderBy(desc(systemLogsTable.createdAt))
+    .limit(50);
+  res.json(logs.map(l => ({ ...l, createdAt: l.createdAt.toISOString() })));
+});
+
+// ─── Support Tickets ──────────────────────────────────────────────────────────
+
+router.get("/admin/support", requireAdmin, async (req, res): Promise<void> => {
+  const statusFilter   = (req.query.status   as string) || "all";
+  const priorityFilter = (req.query.priority as string) || "all";
+  const search         = (req.query.search   as string) || "";
+
+  const conditions = [];
+  if (statusFilter   !== "all") conditions.push(eq(supportTicketsTable.status, statusFilter));
+  if (priorityFilter !== "all") conditions.push(eq(supportTicketsTable.priority, priorityFilter));
+  if (search) {
+    conditions.push(or(
+      ilike(supportTicketsTable.subject,   `%${search}%`),
+      ilike(supportTicketsTable.userEmail, `%${search}%`),
+    ));
+  }
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const tickets = await db.select().from(supportTicketsTable)
+    .where(where)
+    .orderBy(desc(supportTicketsTable.createdAt))
+    .limit(100);
+
+  res.json(tickets.map(t => ({
+    ...t,
+    createdAt:  t.createdAt.toISOString(),
+    updatedAt:  t.updatedAt.toISOString(),
+    resolvedAt: t.resolvedAt?.toISOString() ?? null,
+  })));
+});
+
+router.get("/admin/support/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  const [ticket] = await db.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  if (!ticket) { res.status(404).json({ error: "Ticket not found." }); return; }
+  res.json({
+    ...ticket,
+    createdAt:  ticket.createdAt.toISOString(),
+    updatedAt:  ticket.updatedAt.toISOString(),
+    resolvedAt: ticket.resolvedAt?.toISOString() ?? null,
+  });
+});
+
+router.patch("/admin/support/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id    = parseInt(req.params.id, 10);
+  const admin = req.user!;
+  const { status, priority, adminNote, assignedTo } = req.body as Record<string, string>;
+
+  await db.update(supportTicketsTable).set({
+    ...(status     !== undefined && { status }),
+    ...(priority   !== undefined && { priority }),
+    ...(adminNote  !== undefined && { adminNote }),
+    ...(assignedTo !== undefined && { assignedTo }),
+    ...(status === "resolved" && { resolvedAt: new Date() }),
+    updatedAt: new Date(),
+  }).where(eq(supportTicketsTable.id, id));
+
+  await db.insert(systemLogsTable).values({
+    userId:      admin.id,
+    type:        "support_ticket_update",
+    severity:    "info",
+    description: `Admin updated ticket #${id} — status: ${status ?? "—"}, priority: ${priority ?? "—"}`,
+  });
+
+  res.json({ ok: true });
+});
+
+router.post("/admin/support/:id/reply", requireAdmin, async (req, res): Promise<void> => {
+  const id    = parseInt(req.params.id, 10);
+  const admin = req.user!;
+  const { message } = req.body as { message: string };
+
+  if (!message?.trim()) { res.status(400).json({ error: "Message required." }); return; }
+
+  const [ticket] = await db.select().from(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  if (!ticket) { res.status(404).json({ error: "Ticket not found." }); return; }
+
+  const replies = (ticket.replies ?? []) as import("@workspace/db").TicketReply[];
+  const newReply: import("@workspace/db").TicketReply = {
+    id:         Date.now().toString(),
+    author:     "admin",
+    authorName: `Admin (${admin.email})`,
+    message:    message.trim(),
+    createdAt:  new Date().toISOString(),
+  };
+
+  await db.update(supportTicketsTable).set({
+    replies:   [...replies, newReply],
+    status:    ticket.status === "open" ? "in_progress" : ticket.status,
+    updatedAt: new Date(),
+  }).where(eq(supportTicketsTable.id, id));
+
+  res.json({ ok: true, reply: newReply });
+});
+
+router.delete("/admin/support/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = parseInt(req.params.id, 10);
+  await db.delete(supportTicketsTable).where(eq(supportTicketsTable.id, id));
+  res.json({ ok: true });
+});
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+router.get("/admin/export/users", requireAdmin, async (req, res): Promise<void> => {
+  const users = await db.select({
+    id:             usersTable.id,
+    email:          usersTable.email,
+    name:           usersTable.name,
+    role:           usersTable.role,
+    plan:           usersTable.plan,
+    credits:        usersTable.credits,
+    status:         usersTable.status,
+    gmailConnected: usersTable.gmailConnected,
+    createdAt:      usersTable.createdAt,
+    lastActiveAt:   usersTable.lastActiveAt,
+  }).from(usersTable).orderBy(desc(usersTable.createdAt));
+
+  const csv = [
+    "id,email,name,role,plan,credits,status,gmailConnected,createdAt,lastActiveAt",
+    ...users.map(u =>
+      `${u.id},"${u.email}","${u.name ?? ""}",${u.role},${u.plan},${u.credits},${u.status},${u.gmailConnected},${u.createdAt.toISOString()},${u.lastActiveAt?.toISOString() ?? ""}`
+    ),
+  ].join("\n");
+
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="users_${new Date().toISOString().split("T")[0]}.csv"`);
+  res.send(csv);
+});
+
+router.get("/admin/export/campaigns", requireAdmin, async (_req, res): Promise<void> => {
+  const campaigns = await db.select().from(campaignsTable).orderBy(desc(campaignsTable.createdAt));
+  const csv = [
+    "id,userId,name,status,subject,createdAt",
+    ...campaigns.map(c =>
+      `${c.id},${c.userId},"${c.name}","${c.status}","${(c.subject ?? "").replace(/"/g, '""')}",${c.createdAt.toISOString()}`
+    ),
+  ].join("\n");
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="campaigns_${new Date().toISOString().split("T")[0]}.csv"`);
+  res.send(csv);
+});
+
+router.get("/admin/export/settings", requireAdmin, async (_req, res): Promise<void> => {
+  const rows   = await db.select().from(adminSettingsTable);
+  const stored = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="settings_${new Date().toISOString().split("T")[0]}.json"`);
+  res.json({ ...DEFAULT_SETTINGS, ...stored });
+});
+
+// ─── Audit log: all admin actions ────────────────────────────────────────────
+
+router.get("/admin/audit", requireAdmin, async (req, res): Promise<void> => {
+  const page  = Math.max(parseInt(req.query.page  as string, 10) || 1, 1);
+  const limit = Math.min(parseInt(req.query.limit as string, 10) || 50, 200);
+
+  const adminTypes = ["admin_user_update", "admin_user_delete", "admin_settings_update",
+    "admin_plan_update", "admin_plan_assigned", "admin_plan_request_approved",
+    "admin_plan_request_rejected", "credit_adjustment", "support_ticket_update"];
+
+  const [totalResult] = await db.select({ count: count() }).from(systemLogsTable)
+    .where(or(...adminTypes.map(t => eq(systemLogsTable.type, t))));
+
+  const logs = await db.select().from(systemLogsTable)
+    .where(or(...adminTypes.map(t => eq(systemLogsTable.type, t))))
+    .orderBy(desc(systemLogsTable.createdAt))
+    .limit(limit).offset((page - 1) * limit);
+
+  res.json({
+    data:  logs.map(l => ({ ...l, createdAt: l.createdAt.toISOString() })),
+    total: totalResult.count,
+    page,
+    limit,
+  });
+});
 
 router.post("/admin/users/:id/assign-plan", requireAdmin, async (req, res): Promise<void> => {
   const targetId = parseInt(req.params.id, 10);
