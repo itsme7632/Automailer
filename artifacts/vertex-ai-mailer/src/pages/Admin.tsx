@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { AdminSettings } from "./AdminSettings";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +47,7 @@ interface AdminLog {
   description: string; userId: number | null; createdAt: string;
 }
 
-interface AdminSettings {
+interface AdminSettingsData {
   maintenanceMode: string; maxEmailsPerDay: string;
   maxLeadsPerUpload: string; platformName: string;
   defaultSmtpHost: string; emailLimitPerUser: string;
@@ -334,7 +335,7 @@ export default function Admin() {
   const [logSearch, setLogSearch]     = useState("");
 
   // Settings
-  const [settings, setSettings]       = useState<AdminSettings>({
+  const [settings, setSettings]       = useState<AdminSettingsData>({
     maintenanceMode: "false", maxEmailsPerDay: "1000",
     maxLeadsPerUpload: "10000", platformName: "BrokerMail AI",
     defaultSmtpHost: "", emailLimitPerUser: "500",
@@ -967,72 +968,7 @@ export default function Admin() {
 
           {/* ── SETTINGS ─────────────────────────────────────────────────── */}
           {tab === "settings" && (
-            <div className="space-y-5 max-w-xl">
-              {settingsLoading ? (
-                <div className="space-y-3">{Array(5).fill(0).map((_, i) => <Skeleton key={i} className="h-12 w-full rounded-xl" />)}</div>
-              ) : (
-                <>
-                  <div className="space-y-4">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Platform</p>
-
-                    <div className="space-y-1.5">
-                      <label className="text-sm font-medium text-slate-700">Platform Name</label>
-                      <Input value={settings.platformName}
-                        onChange={e => setSettings(s => ({ ...s, platformName: e.target.value }))}
-                        className="rounded-xl" />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-800">Maintenance Mode</p>
-                        <p className="text-xs text-slate-500 mt-0.5">Disables access for non-admin users</p>
-                      </div>
-                      <button
-                        onClick={() => setSettings(s => ({ ...s, maintenanceMode: s.maintenanceMode === "true" ? "false" : "true" }))}
-                        className={`relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors ${settings.maintenanceMode === "true" ? "bg-red-500" : "bg-slate-200"}`}
-                        role="switch"
-                      >
-                        <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${settings.maintenanceMode === "true" ? "translate-x-5" : "translate-x-0"}`} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
-                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Limits</p>
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      {[
-                        { key: "maxEmailsPerDay",   label: "Max Emails / Day (platform)" },
-                        { key: "emailLimitPerUser", label: "Max Emails / Day (per user)" },
-                        { key: "maxLeadsPerUpload", label: "Max Leads Per Upload" },
-                      ].map(f => (
-                        <div key={f.key} className="space-y-1.5">
-                          <label className="text-sm font-medium text-slate-700">{f.label}</label>
-                          <Input
-                            type="number"
-                            value={(settings as any)[f.key] ?? ""}
-                            onChange={e => setSettings(s => ({ ...s, [f.key]: e.target.value }))}
-                            className="rounded-xl font-mono"
-                          />
-                        </div>
-                      ))}
-                      <div className="space-y-1.5">
-                        <label className="text-sm font-medium text-slate-700">Default SMTP Host</label>
-                        <Input value={settings.defaultSmtpHost}
-                          onChange={e => setSettings(s => ({ ...s, defaultSmtpHost: e.target.value }))}
-                          placeholder="smtp.hostinger.com"
-                          className="rounded-xl font-mono" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <Button onClick={saveSettings} disabled={savingSettings} className="rounded-xl gap-2 px-6">
-                    {savingSettings
-                      ? <><RefreshCw className="h-4 w-4 animate-spin" />Saving…</>
-                      : <><Settings className="h-4 w-4" />Save Settings</>}
-                  </Button>
-                </>
-              )}
-            </div>
+            <AdminSettings />
           )}
 
           {/* ── BILLING ─────────────────────────────────────────────────── */}
