@@ -9,6 +9,8 @@ export const emailQueueTable = pgTable("email_queue", {
     .references(() => usersTable.id, { onDelete: "cascade" }),
   mailboxId: integer("mailbox_id").notNull(),
   templateId: integer("template_id").notNull(),
+  campaignId: integer("campaign_id"),
+  leadId: integer("lead_id"),
   email: text("email").notNull(),
   subject: text("subject").notNull().default(""),
   rowDataJson: text("row_data_json").notNull(),

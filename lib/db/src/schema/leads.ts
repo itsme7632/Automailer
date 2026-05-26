@@ -19,6 +19,7 @@ export const leadsTable = pgTable("leads", {
   status: text("status").notNull().default("new"),
   gmailDraftId: text("gmail_draft_id"),
   errorMessage: text("error_message"),
+  sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

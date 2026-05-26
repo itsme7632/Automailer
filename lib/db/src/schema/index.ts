@@ -1,5 +1,6 @@
 export * from "./users";
 export * from "./campaigns";
+export * from "./campaign_batches";
 export * from "./leads";
 export * from "./templates";
 export * from "./drafts";
