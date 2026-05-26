@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Loader2, CheckCircle2, XCircle, Server, Mail, User, Lock,
   Wifi, Trash2, Save, FlaskConical, ChevronDown, ChevronUp, FolderSync,
+  Shield, Clock, Gauge, AlertTriangle, Zap,
 } from "lucide-react";
 
 type Secure = "ssl" | "tls" | "none";
@@ -13,21 +14,49 @@ interface MailboxForm {
   smtpHost: string; smtpPort: string; smtpUser: string; smtpPass: string; smtpSecure: Secure;
   imapHost: string; imapPort: string; imapUser: string; imapPass: string;
   fromName: string; replyTo: string;
+  batchSize: number;
+  delaySeconds: number;
+  maxPerHour: number;
 }
 
 const EMPTY_FORM: MailboxForm = {
   smtpHost: "", smtpPort: "587", smtpUser: "", smtpPass: "", smtpSecure: "tls",
   imapHost: "", imapPort: "993", imapUser: "", imapPass: "",
   fromName: "", replyTo: "",
+  batchSize: 10,
+  delaySeconds: 15,
+  maxPerHour: 100,
 };
 
 const PRESETS = [
-  { name: "Hostinger",       smtp: "smtp.hostinger.com", smtpPort: "465", secure: "ssl" as Secure, imap: "imap.hostinger.com", imapPort: "993" },
-  { name: "cPanel / WHM",    smtp: "mail.yourdomain.com", smtpPort: "465", secure: "ssl" as Secure, imap: "mail.yourdomain.com", imapPort: "993" },
-  { name: "Zoho Mail",       smtp: "smtp.zoho.com", smtpPort: "465", secure: "ssl" as Secure, imap: "imap.zoho.com", imapPort: "993" },
-  { name: "Outlook / 365",   smtp: "smtp.office365.com", smtpPort: "587", secure: "tls" as Secure, imap: "outlook.office365.com", imapPort: "993" },
-  { name: "Gmail SMTP",      smtp: "smtp.gmail.com", smtpPort: "587", secure: "tls" as Secure, imap: "imap.gmail.com", imapPort: "993" },
+  { name: "Hostinger",       smtp: "smtp.hostinger.com",    smtpPort: "465", secure: "ssl" as Secure, imap: "imap.hostinger.com",    imapPort: "993" },
+  { name: "cPanel / WHM",    smtp: "mail.yourdomain.com",   smtpPort: "465", secure: "ssl" as Secure, imap: "mail.yourdomain.com",   imapPort: "993" },
+  { name: "Zoho Mail",       smtp: "smtp.zoho.com",         smtpPort: "465", secure: "ssl" as Secure, imap: "imap.zoho.com",         imapPort: "993" },
+  { name: "Outlook / 365",   smtp: "smtp.office365.com",    smtpPort: "587", secure: "tls" as Secure, imap: "outlook.office365.com", imapPort: "993" },
+  { name: "Gmail SMTP",      smtp: "smtp.gmail.com",        smtpPort: "587", secure: "tls" as Secure, imap: "imap.gmail.com",        imapPort: "993" },
   { name: "Namecheap Email", smtp: "mail.privateemail.com", smtpPort: "465", secure: "ssl" as Secure, imap: "mail.privateemail.com", imapPort: "993" },
+];
+
+const DELAY_OPTIONS = [
+  { value: 5,  label: "5s",  desc: "Fast" },
+  { value: 10, label: "10s", desc: "Normal" },
+  { value: 15, label: "15s", desc: "Safe ★" },
+  { value: 30, label: "30s", desc: "Careful" },
+  { value: 60, label: "60s", desc: "Slow" },
+];
+
+const BATCH_OPTIONS = [
+  { value: 10,  label: "10" },
+  { value: 25,  label: "25" },
+  { value: 50,  label: "50" },
+  { value: 100, label: "100" },
+];
+
+const HOURLY_OPTIONS = [
+  { value: 50,  label: "50/hr" },
+  { value: 100, label: "100/hr" },
+  { value: 200, label: "200/hr" },
+  { value: 500, label: "500/hr" },
 ];
 
 function StatusPill({
@@ -71,31 +100,59 @@ function Field({
   );
 }
 
-function TestBadge({ state }: { state: "idle" | "testing" | "ok" | "fail"; msg?: string }) {
+function TestBadge({ state }: { state: "idle" | "testing" | "ok" | "fail" }) {
   if (state === "testing") return <span className="flex items-center gap-1 text-xs text-slate-500"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Testing…</span>;
   if (state === "ok")      return <span className="flex items-center gap-1 text-xs text-emerald-600"><CheckCircle2 className="h-3.5 w-3.5" /> Connected</span>;
   if (state === "fail")    return <span className="flex items-center gap-1 text-xs text-red-500"><XCircle className="h-3.5 w-3.5" /> Failed</span>;
   return null;
 }
 
+function ChipRow<T extends number>({
+  options, value, onChange,
+}: {
+  options: { value: T; label: string; desc?: string }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map(opt => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`flex flex-col items-center px-4 py-2 rounded-xl border-2 text-xs font-semibold transition-colors min-w-[56px] ${
+            value === opt.value
+              ? "border-blue-500 bg-blue-50 text-blue-800"
+              : "border-slate-200 text-slate-600 hover:border-slate-300 bg-white"
+          }`}
+        >
+          {opt.label}
+          {opt.desc && <span className="text-xs font-normal opacity-60 mt-0.5">{opt.desc}</span>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export default function MailboxSettings() {
   const { toast } = useToast();
-  const [form, setForm]         = useState<MailboxForm>(EMPTY_FORM);
+  const [form, setForm]               = useState<MailboxForm>(EMPTY_FORM);
   const [isLoading, setIsLoading]     = useState(true);
   const [isSaving, setIsSaving]       = useState(false);
   const [isConnected, setIsConnected] = useState(false);
-  const [smtpTest, setSmtpTest] = useState<"idle"|"testing"|"ok"|"fail">("idle");
-  const [imapTest, setImapTest] = useState<"idle"|"testing"|"ok"|"fail">("idle");
-  const [smtpErr, setSmtpErr]   = useState("");
-  const [imapErr, setImapErr]   = useState("");
-  const [showImap, setShowImap] = useState(false);
+  const [smtpTest, setSmtpTest]       = useState<"idle"|"testing"|"ok"|"fail">("idle");
+  const [imapTest, setImapTest]       = useState<"idle"|"testing"|"ok"|"fail">("idle");
+  const [smtpErr, setSmtpErr]         = useState("");
+  const [imapErr, setImapErr]         = useState("");
+  const [showImap, setShowImap]       = useState(false);
+  const [customDelay, setCustomDelay] = useState("");
+  const [customHourly, setCustomHourly] = useState("");
 
-  const set = (key: keyof MailboxForm, val: string) =>
+  const set = <K extends keyof MailboxForm>(key: K, val: MailboxForm[K]) =>
     setForm(f => ({ ...f, [key]: val }));
 
-  useEffect(() => {
-    loadMailbox();
-  }, []);
+  useEffect(() => { loadMailbox(); }, []);
 
   async function loadMailbox() {
     setIsLoading(true);
@@ -119,6 +176,9 @@ export default function MailboxSettings() {
             imapPass: "",
             fromName: data.fromName ?? "",
             replyTo:  data.replyTo  ?? "",
+            batchSize:    data.batchSize    ?? 10,
+            delaySeconds: data.delaySeconds ?? 15,
+            maxPerHour:   data.maxPerHour   ?? 100,
           });
         }
       }
@@ -143,11 +203,7 @@ export default function MailboxSettings() {
       const res = await fetch("/api/mailbox/test-smtp", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smtpHost: form.smtpHost, smtpPort: Number(form.smtpPort),
-          smtpUser: form.smtpUser, smtpPass: form.smtpPass,
-          smtpSecure: form.smtpSecure,
-        }),
+        body: JSON.stringify({ smtpHost: form.smtpHost, smtpPort: Number(form.smtpPort), smtpUser: form.smtpUser, smtpPass: form.smtpPass, smtpSecure: form.smtpSecure }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Test failed");
@@ -164,10 +220,7 @@ export default function MailboxSettings() {
       const res = await fetch("/api/mailbox/test-imap", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imapHost: form.imapHost, imapPort: Number(form.imapPort),
-          imapUser: form.imapUser, imapPass: form.imapPass,
-        }),
+        body: JSON.stringify({ imapHost: form.imapHost, imapPort: Number(form.imapPort), imapUser: form.imapUser, imapPass: form.imapPass }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Test failed");
@@ -193,12 +246,15 @@ export default function MailboxSettings() {
           imapUser: form.imapUser || undefined, imapPass: form.imapPass || undefined,
           fromName: form.fromName || undefined,
           replyTo:  form.replyTo  || undefined,
+          batchSize:    form.batchSize,
+          delaySeconds: form.delaySeconds,
+          maxPerHour:   form.maxPerHour,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Save failed");
       setIsConnected(true);
-      toast({ title: "Mailbox saved", description: "Your SMTP settings are now active." });
+      toast({ title: "Mailbox saved", description: "Settings and sending protection are now active." });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Save failed", description: err.message });
     } finally { setIsSaving(false); }
@@ -225,25 +281,26 @@ export default function MailboxSettings() {
     );
   }
 
+  const isCustomDelay  = !DELAY_OPTIONS.some(o => o.value === form.delaySeconds);
+  const isCustomHourly = !HOURLY_OPTIONS.some(o => o.value === form.maxPerHour);
+
   return (
     <div className="space-y-6 max-w-2xl mx-auto">
       <div>
         <h2 className="text-2xl font-bold tracking-tight text-slate-900">Mailbox Settings</h2>
         <p className="text-slate-500 mt-1 text-sm">
-          Connect your business email to send directly from your own domain — no Gmail required.
+          Connect your business email and configure sending protection to maximize deliverability.
         </p>
       </div>
 
       {/* Status badge */}
       <div className={`flex items-center gap-3 p-4 rounded-2xl border ${
-        isConnected
-          ? "bg-emerald-50 border-emerald-200"
-          : "bg-slate-50 border-slate-200"
+        isConnected ? "bg-emerald-50 border-emerald-200" : "bg-slate-50 border-slate-200"
       }`}>
         <div className={`h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 ${
           isConnected ? "bg-emerald-100" : "bg-slate-100"
         }`}>
-          <Mail className={`h-4.5 w-4.5 ${isConnected ? "text-emerald-600" : "text-slate-400"} h-5 w-5`} />
+          <Mail className={`h-5 w-5 ${isConnected ? "text-emerald-600" : "text-slate-400"}`} />
         </div>
         <div className="flex-1 min-w-0">
           <p className={`font-semibold text-sm ${isConnected ? "text-emerald-900" : "text-slate-700"}`}>
@@ -266,26 +323,13 @@ export default function MailboxSettings() {
         )}
       </div>
 
-      {/* Connection status indicators */}
+      {/* Status pills */}
       {isConnected && (
         <div className="flex flex-wrap gap-2">
-          <StatusPill
-            icon={Server}
-            label="SMTP Connected"
-            active={true}
-          />
-          <StatusPill
-            icon={Mail}
-            label="IMAP Connected"
-            active={!!form.imapHost}
-            inactiveLabel="IMAP Not Configured"
-          />
-          <StatusPill
-            icon={FolderSync}
-            label="Sent Folder Sync Active"
-            active={!!form.imapHost}
-            inactiveLabel="Sent Folder Sync Inactive"
-          />
+          <StatusPill icon={Server}     label="SMTP Connected"          active={true} />
+          <StatusPill icon={Mail}       label="IMAP Connected"          active={!!form.imapHost} inactiveLabel="IMAP Not Configured" />
+          <StatusPill icon={FolderSync} label="Sent Folder Sync Active" active={!!form.imapHost} inactiveLabel="Sent Folder Sync Inactive" />
+          <StatusPill icon={Shield}     label={`${form.delaySeconds}s delay · ${form.batchSize} per batch`} active={true} />
         </div>
       )}
 
@@ -356,8 +400,7 @@ export default function MailboxSettings() {
               hint={isConnected ? "Only fill to change the saved password" : undefined} />
           </div>
           <div className="px-6 pb-5 flex items-center gap-3">
-            <Button
-              type="button" variant="outline" size="sm"
+            <Button type="button" variant="outline" size="sm"
               onClick={handleTestSmtp}
               disabled={smtpTest === "testing" || !form.smtpHost || !form.smtpUser || !form.smtpPass}
               className="rounded-xl gap-1.5"
@@ -372,7 +415,7 @@ export default function MailboxSettings() {
           </div>
         </div>
 
-        {/* IMAP Section (collapsible) */}
+        {/* IMAP Section */}
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <button
             type="button"
@@ -409,8 +452,7 @@ export default function MailboxSettings() {
                   placeholder={isConnected && form.imapHost ? "Leave blank to keep current" : "IMAP password"} />
               </div>
               <div className="px-6 pb-5 flex items-center gap-3">
-                <Button
-                  type="button" variant="outline" size="sm"
+                <Button type="button" variant="outline" size="sm"
                   onClick={handleTestImap}
                   disabled={imapTest === "testing" || !form.imapHost || !form.imapUser || !form.imapPass}
                   className="rounded-xl gap-1.5"
@@ -438,6 +480,128 @@ export default function MailboxSettings() {
               onChange={v => set("fromName", v)} placeholder="NSLA Carship Sales" />
             <Field label="Reply-To Email" icon={Mail} value={form.replyTo}
               onChange={v => set("replyTo", v)} placeholder="sales@yourcompany.com" />
+          </div>
+        </div>
+
+        {/* ── Sending Protection ──────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+            <Shield className="h-4 w-4 text-violet-500" />
+            <h3 className="font-semibold text-slate-800 text-sm">Sending Protection</h3>
+            <span className="ml-auto text-xs text-slate-400">Deliverability &amp; rate limiting</span>
+          </div>
+
+          {/* Safety warning */}
+          <div className="px-6 pt-5 pb-3">
+            <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200">
+              <AlertTriangle className="h-4 w-4 text-amber-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-amber-800 leading-relaxed">
+                <span className="font-semibold">Lower send speeds improve deliverability and reduce spam/rate-limit issues.</span>{" "}
+                A 15-second delay with batches of 10 is the recommended default for most mailboxes.
+              </p>
+            </div>
+          </div>
+
+          <div className="px-6 pb-6 space-y-6">
+            {/* Delay between emails */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-slate-400" />
+                <label className="text-sm font-semibold text-slate-700">Delay between emails</label>
+                <span className="ml-auto text-xs text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full">
+                  {form.delaySeconds}s
+                </span>
+              </div>
+              <ChipRow
+                options={DELAY_OPTIONS}
+                value={DELAY_OPTIONS.find(o => o.value === form.delaySeconds)?.value ?? (isCustomDelay ? -1 as any : 15)}
+                onChange={v => { set("delaySeconds", v); setCustomDelay(""); }}
+              />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 flex-shrink-0">Custom (seconds):</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  value={customDelay}
+                  onChange={e => {
+                    setCustomDelay(e.target.value);
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v > 0) set("delaySeconds", v);
+                  }}
+                  placeholder={String(form.delaySeconds)}
+                  className="h-8 rounded-lg text-xs w-28 font-mono"
+                />
+              </div>
+            </div>
+
+            {/* Batch size */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Zap className="h-4 w-4 text-slate-400" />
+                <label className="text-sm font-semibold text-slate-700">Emails per batch</label>
+                <span className="ml-auto text-xs text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full">
+                  {form.batchSize} emails
+                </span>
+              </div>
+              <ChipRow
+                options={BATCH_OPTIONS}
+                value={form.batchSize}
+                onChange={v => set("batchSize", v)}
+              />
+              <p className="text-xs text-slate-400">
+                When you launch a campaign, only this many emails will be queued at once. You can send more batches after.
+              </p>
+            </div>
+
+            {/* Max per hour */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-slate-400" />
+                <label className="text-sm font-semibold text-slate-700">Max emails per hour</label>
+                <span className="ml-auto text-xs text-blue-600 font-semibold bg-blue-50 px-2 py-0.5 rounded-full">
+                  {form.maxPerHour}/hr
+                </span>
+              </div>
+              <ChipRow
+                options={HOURLY_OPTIONS}
+                value={HOURLY_OPTIONS.find(o => o.value === form.maxPerHour)?.value ?? (isCustomHourly ? -1 as any : 100)}
+                onChange={v => { set("maxPerHour", v); setCustomHourly(""); }}
+              />
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 flex-shrink-0">Custom (per hour):</span>
+                <Input
+                  type="number"
+                  min={1}
+                  max={10000}
+                  value={customHourly}
+                  onChange={e => {
+                    setCustomHourly(e.target.value);
+                    const v = parseInt(e.target.value);
+                    if (!isNaN(v) && v > 0) set("maxPerHour", v);
+                  }}
+                  placeholder={String(form.maxPerHour)}
+                  className="h-8 rounded-lg text-xs w-28 font-mono"
+                />
+              </div>
+              <p className="text-xs text-slate-400">
+                If you hit this limit, sending pauses automatically and resumes when the hour window resets.
+              </p>
+            </div>
+
+            {/* Summary */}
+            <div className="flex flex-wrap gap-3 p-4 rounded-xl bg-slate-50 border border-slate-100">
+              {[
+                { icon: Clock, text: `${form.delaySeconds}s between emails` },
+                { icon: Zap,   text: `${form.batchSize} per batch` },
+                { icon: Gauge, text: `${form.maxPerHour}/hr max` },
+              ].map(({ icon: Icon, text }) => (
+                <div key={text} className="flex items-center gap-1.5">
+                  <Icon className="h-3.5 w-3.5 text-violet-500" />
+                  <span className="text-xs font-medium text-slate-700">{text}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 

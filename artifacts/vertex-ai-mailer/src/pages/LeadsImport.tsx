@@ -5,10 +5,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import {
   UploadCloud, File as FileIcon, Loader2, CheckCircle2, XCircle,
-  AlertCircle, Mail, FileText, RefreshCw, Zap, PenLine, Server, SendHorizonal,
+  AlertCircle, Mail, FileText, RefreshCw, Zap, PenLine, Server,
+  SendHorizonal, Clock, Gauge, Shield, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
+import { SendProgressPanel } from "@/components/SendProgressPanel";
+import type { JobStatus } from "@/components/SendProgressPanel";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -47,22 +50,23 @@ interface CreateResult {
   total: number; succeeded: number; failed: number; results: DraftRowResult[];
 }
 
+interface MailboxRateSettings {
+  batchSize: number;
+  delaySeconds: number;
+  maxPerHour: number;
+}
+
 type EmailStyle = "clean" | "modern" | "minimal" | "luxury";
 
 const EMAIL_STYLES: { value: EmailStyle; label: string; desc: string; bg: string }[] = [
-  { value: "clean",   label: "Clean",   desc: "Blue header",           bg: "#1d4ed8" },
-  { value: "modern",  label: "Modern",  desc: "Purple accent",         bg: "#4f46e5" },
-  { value: "minimal", label: "Minimal", desc: "White, thin accent",    bg: "#e2e8f0" },
-  { value: "luxury",  label: "Luxury",  desc: "Dark navy, gold",       bg: "#0f172a" },
+  { value: "clean",   label: "Clean",   desc: "Blue header",         bg: "#1d4ed8" },
+  { value: "modern",  label: "Modern",  desc: "Purple accent",       bg: "#4f46e5" },
+  { value: "minimal", label: "Minimal", desc: "White, thin accent",  bg: "#e2e8f0" },
+  { value: "luxury",  label: "Luxury",  desc: "Dark navy, gold",     bg: "#0f172a" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function replaceVarsText(text: string, row: Record<string, string>): string {
-  return text.replace(/\{([^}]+)\}/g, (match, key) => row[key.trim()] ?? match);
-}
-
-/** Convert ParsedRow (with booleans) to a plain string record for the API */
 function toStringRow(row: ParsedRow): Record<string, string> {
   const result: Record<string, string> = {};
   for (const [k, v] of Object.entries(row)) {
@@ -72,47 +76,39 @@ function toStringRow(row: ParsedRow): Record<string, string> {
   return result;
 }
 
+function replaceVarsText(text: string, row: Record<string, string>): string {
+  return text.replace(/\{([^}]+)\}/g, (match, key) => row[key.trim()] ?? match);
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function LeadsImport() {
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [file, setFile]                             = useState<File | null>(null);
-  const [isUploading, setIsUploading]               = useState(false);
-  const [parseResult, setParseResult]               = useState<ParseResult | null>(null);
+  const [file, setFile]                           = useState<File | null>(null);
+  const [isUploading, setIsUploading]             = useState(false);
+  const [parseResult, setParseResult]             = useState<ParseResult | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
-  const [emailStyle, setEmailStyle]                 = useState<EmailStyle>("clean");
+  const [emailStyle, setEmailStyle]               = useState<EmailStyle>("clean");
   const [useSignatureBuilder, setUseSignatureBuilder] = useState(false);
-  // Load user's saved signature default from branding settings
-  useEffect(() => {
-    const token = localStorage.getItem("auth_token");
-    fetch("/api/users/branding", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => { if (typeof d.useSignature === "boolean") setUseSignatureBuilder(d.useSignature); })
-      .catch(() => {});
-  }, []);
-  const [isCreating, setIsCreating]                 = useState(false);
-  const [createResult, setCreateResult]             = useState<CreateResult | null>(null);
+  const [isCreating, setIsCreating]               = useState(false);
+  const [createResult, setCreateResult]           = useState<CreateResult | null>(null);
 
-  const [mailboxConnected, setMailboxConnected] = useState(false);
-  const [sendMode, setSendMode]                 = useState<"gmail" | "smtp">("gmail");
-  const [smtpBatchSize, setSmtpBatchSize]       = useState<0 | 50 | 100 | 500>(0);
-  const [smtpSendResult, setSmtpSendResult]     = useState<CreateResult | null>(null);
-  const [smtpSending, setSmtpSending]           = useState(false);
+  const [mailboxConnected, setMailboxConnected]   = useState(false);
+  const [mailboxRates, setMailboxRates]           = useState<MailboxRateSettings>({ batchSize: 10, delaySeconds: 15, maxPerHour: 100 });
+  const [sendMode, setSendMode]                   = useState<"gmail" | "smtp">("gmail");
 
-  useEffect(() => {
-    const token = localStorage.getItem("auth_token");
-    fetch("/api/mailbox", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => { if (d?.smtpHost) setMailboxConnected(true); })
-      .catch(() => {});
-  }, []);
+  // SMTP send state — job-based
+  const [smtpSending, setSmtpSending]             = useState(false);
+  const [currentJobId, setCurrentJobId]           = useState<string | null>(null);
+  const [smtpJobDelay, setSmtpJobDelay]           = useState(15);
+  const [smtpBatchOverride, setSmtpBatchOverride] = useState<number | null>(null);
+  const [showBatchOptions, setShowBatchOptions]   = useState(false);
 
-  // Unified preview state — fetched from the same pipeline as the actual draft
-  const [previewHtml, setPreviewHtml]     = useState<string | null>(null);
-  const [previewSubject, setPreviewSubject] = useState<string | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [previewHtml, setPreviewHtml]             = useState<string | null>(null);
+  const [previewSubject, setPreviewSubject]       = useState<string | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview]   = useState(false);
 
   const { data: templates, isLoading: templatesLoading } = useGetTemplates();
   const { data: gmailStatus } = useGetGmailStatus();
@@ -129,7 +125,30 @@ export default function LeadsImport() {
 
   const previewRow = useMemo(() => readyRows[0] ? toStringRow(readyRows[0]) : null, [readyRows]);
 
-  // ─── Fetch live HTML preview from server (same pipeline as actual draft) ──
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token");
+    fetch("/api/users/branding", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => { if (typeof d.useSignature === "boolean") setUseSignatureBuilder(d.useSignature); })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const token = localStorage.getItem("auth_token");
+    fetch("/api/mailbox", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        if (d?.smtpHost) {
+          setMailboxConnected(true);
+          setMailboxRates({
+            batchSize:    d.batchSize    ?? 10,
+            delaySeconds: d.delaySeconds ?? 15,
+            maxPerHour:   d.maxPerHour   ?? 100,
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchPreview = useCallback(async (
     templateId: number,
@@ -169,7 +188,7 @@ export default function LeadsImport() {
   async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    setFile(f); setCreateResult(null);
+    setFile(f); setCreateResult(null); setCurrentJobId(null);
     await parseFile(f);
   }
 
@@ -224,8 +243,8 @@ export default function LeadsImport() {
 
   async function handleSmtpSend() {
     if (!selectedTemplate || readyRows.length === 0) return;
-    const rowsToSend = smtpBatchSize > 0 ? readyRows.slice(0, smtpBatchSize) : readyRows;
-    setSmtpSending(true); setSmtpSendResult(null); setCreateResult(null);
+    const batchSize = smtpBatchOverride ?? mailboxRates.batchSize;
+    setSmtpSending(true); setCurrentJobId(null);
     try {
       const token = localStorage.getItem("auth_token");
       const res = await fetch("/api/mailbox/send", {
@@ -233,17 +252,19 @@ export default function LeadsImport() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           templateId: selectedTemplate.id,
-          rows: rowsToSend.map(toStringRow),
+          rows: readyRows.map(toStringRow),
           style: emailStyle,
           useSignatureBuilder,
+          batchSize,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Send failed");
-      setSmtpSendResult(data);
+      setCurrentJobId(data.jobId);
+      setSmtpJobDelay(data.delaySeconds ?? mailboxRates.delaySeconds);
       toast({
-        title: `${data.succeeded} email${data.succeeded !== 1 ? "s" : ""} sent`,
-        description: data.failed > 0 ? `${data.failed} failed — see details below.` : "Delivered via your mailbox.",
+        title: `${data.total} email${data.total !== 1 ? "s" : ""} queued`,
+        description: `Sending with ${data.delaySeconds}s delay. Track progress below.`,
       });
     } catch (err: any) {
       toast({ variant: "destructive", title: "Send Error", description: err.message });
@@ -283,7 +304,8 @@ export default function LeadsImport() {
   function handleReset() {
     setFile(null); setParseResult(null); setCreateResult(null);
     setPreviewHtml(null); setPreviewSubject(null);
-    setSmtpSendResult(null); setSendMode("gmail");
+    setCurrentJobId(null); setSendMode("gmail");
+    setSmtpBatchOverride(null); setShowBatchOptions(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -291,12 +313,14 @@ export default function LeadsImport() {
 
   const gmailConnected = gmailStatus?.connected;
   const readyCount = readyRows.length;
+  const activeBatch = smtpBatchOverride ?? mailboxRates.batchSize;
+  const emailsToSend = Math.min(activeBatch > 0 ? activeBatch : readyCount, readyCount);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Upload & Send</h1>
-        <p className="text-slate-500 mt-1 text-sm">Upload your spreadsheet, pick a template, and create Gmail drafts in seconds.</p>
+        <p className="text-slate-500 mt-1 text-sm">Upload your spreadsheet, pick a template, and deliver personalized emails at scale.</p>
       </div>
 
       {/* Gmail not connected */}
@@ -404,9 +428,9 @@ export default function LeadsImport() {
         </div>
       </div>
 
-      {/* Step 3: Style + Signature + Preview */}
+      {/* Step 3: Style + Preview + Delivery */}
       <AnimatePresence>
-        {selectedTemplate && parseResult && readyCount > 0 && !createResult && (
+        {selectedTemplate && parseResult && readyCount > 0 && !currentJobId && (
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -444,8 +468,8 @@ export default function LeadsImport() {
                     <p className="text-sm font-medium text-slate-800">Signature Builder</p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {useSignatureBuilder
-                        ? "Auto-appends a signature using your branding variables (agent_name, company_name, etc.)"
-                        : "Off — your template content is sent exactly as written, no additions"}
+                        ? "Auto-appends a signature using your branding variables"
+                        : "Off — your template content is sent exactly as written"}
                     </p>
                   </div>
                 </div>
@@ -482,7 +506,6 @@ export default function LeadsImport() {
                 </div>
               )}
 
-              {/* Detected fields */}
               {parseResult.detectedFields.length > 0 && previewRow && (
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {parseResult.detectedFields.map(f =>
@@ -496,7 +519,6 @@ export default function LeadsImport() {
                 </div>
               )}
 
-              {/* HTML email rendered in iframe — EXACT same output as Gmail draft */}
               <div className="rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
                 {previewHtml ? (
                   <iframe
@@ -560,7 +582,7 @@ export default function LeadsImport() {
                     </p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {mailboxConnected
-                        ? "Sent directly from your mailbox. Instant delivery."
+                        ? "Sent directly from your mailbox with rate-limited delivery."
                         : "Connect a mailbox in Mailbox Settings first."}
                     </p>
                   </div>
@@ -568,31 +590,75 @@ export default function LeadsImport() {
                 </button>
               </div>
 
-              {/* SMTP batch size */}
+              {/* SMTP rate-limiter summary + batch override */}
               {sendMode === "smtp" && mailboxConnected && (
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Batch size</p>
-                  <div className="flex flex-wrap gap-2">
-                    {([0, 50, 100, 500] as const).map(n => (
+                <div className="space-y-3">
+                  {/* Rate settings summary from mailbox */}
+                  <div className="flex flex-wrap gap-3 p-3 rounded-xl bg-violet-50 border border-violet-100">
+                    <div className="flex items-center gap-1.5">
+                      <Shield className="h-3.5 w-3.5 text-violet-500" />
+                      <span className="text-xs font-semibold text-violet-800">Sending Protection Active</span>
+                    </div>
+                    <div className="h-3 w-px bg-violet-200" />
+                    <div className="flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5 text-violet-500" />
+                      <span className="text-xs text-violet-700">{mailboxRates.delaySeconds}s delay</span>
+                    </div>
+                    <div className="h-3 w-px bg-violet-200" />
+                    <div className="flex items-center gap-1.5">
+                      <Gauge className="h-3.5 w-3.5 text-violet-500" />
+                      <span className="text-xs text-violet-700">{mailboxRates.maxPerHour}/hr limit</span>
+                    </div>
+                    <Link href="/mailbox">
+                      <span className="text-xs text-violet-600 underline cursor-pointer ml-auto">Edit</span>
+                    </Link>
+                  </div>
+
+                  {/* Batch size override */}
+                  <button
+                    type="button"
+                    onClick={() => setShowBatchOptions(b => !b)}
+                    className="flex items-center gap-2 text-xs text-slate-500 hover:text-slate-700 font-medium"
+                  >
+                    <Zap className="h-3.5 w-3.5" />
+                    Batch size: <span className="text-slate-800">{activeBatch} emails</span>
+                    {showBatchOptions
+                      ? <ChevronUp className="h-3.5 w-3.5 ml-0.5" />
+                      : <ChevronDown className="h-3.5 w-3.5 ml-0.5" />}
+                  </button>
+
+                  {showBatchOptions && (
+                    <div className="flex flex-wrap gap-2 pl-1">
+                      {[10, 25, 50, 100, 0].map(n => (
+                        <button
+                          key={n} type="button"
+                          onClick={() => setSmtpBatchOverride(n === 0 ? null : n)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-colors ${
+                            (n === 0 ? smtpBatchOverride === null : smtpBatchOverride === n)
+                              ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                              : "border-slate-200 text-slate-600 hover:border-slate-300"
+                          }`}
+                        >
+                          {n === 0 ? `Default (${mailboxRates.batchSize})` : `${n}`}
+                        </button>
+                      ))}
                       <button
-                        key={n} type="button"
-                        onClick={() => setSmtpBatchSize(n)}
-                        className={`px-4 py-2 rounded-xl text-xs font-semibold border-2 transition-colors ${
-                          smtpBatchSize === n
+                        type="button"
+                        onClick={() => setSmtpBatchOverride(readyCount)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold border-2 transition-colors ${
+                          smtpBatchOverride === readyCount
                             ? "border-emerald-500 bg-emerald-50 text-emerald-800"
                             : "border-slate-200 text-slate-600 hover:border-slate-300"
                         }`}
                       >
-                        {n === 0
-                          ? `All (${readyCount})`
-                          : n >= readyCount ? `All (${readyCount})` : `${n} emails`}
+                        All ({readyCount})
                       </button>
-                    ))}
-                  </div>
+                    </div>
+                  )}
+
                   <p className="text-xs text-slate-400">
-                    {smtpBatchSize === 0
-                      ? `Will send all ${readyCount} emails now.`
-                      : `Will send ${Math.min(smtpBatchSize, readyCount)} of ${readyCount} emails.`}
+                    Will queue <span className="font-semibold text-slate-600">{emailsToSend}</span> of {readyCount} emails.
+                    ETA ≈ {Math.round((emailsToSend * mailboxRates.delaySeconds) / 60)} min at {mailboxRates.delaySeconds}s/email.
                   </p>
                 </div>
               )}
@@ -611,11 +677,9 @@ export default function LeadsImport() {
                 ) : (
                   <>
                     <p className="text-sm text-slate-600">
-                      <span className="font-semibold text-slate-900">
-                        {smtpBatchSize === 0 || smtpBatchSize >= readyCount ? readyCount : smtpBatchSize} email{readyCount !== 1 ? "s" : ""}
-                      </span> will be sent immediately via SMTP.
+                      <span className="font-semibold text-slate-900">{emailsToSend} email{emailsToSend !== 1 ? "s" : ""}</span> will be queued and sent via SMTP.
                     </p>
-                    <p className="text-xs text-slate-400 mt-0.5">Delivers to recipients' inboxes now.</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{mailboxRates.delaySeconds}s between each email · auto-retry on failure.</p>
                   </>
                 )}
               </div>
@@ -637,11 +701,34 @@ export default function LeadsImport() {
                   className="gap-2 rounded-xl px-6 flex-shrink-0 bg-emerald-600 hover:bg-emerald-700"
                 >
                   {smtpSending
-                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
-                    : <><SendHorizonal className="h-4 w-4" /> Send Now</>}
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Queuing…</>
+                    : <><SendHorizonal className="h-4 w-4" /> Send {emailsToSend} Email{emailsToSend !== 1 ? "s" : ""}</>}
                 </Button>
               )}
             </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* SMTP Send Progress Panel */}
+      <AnimatePresence>
+        {currentJobId && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <SendProgressPanel
+              jobId={currentJobId}
+              delaySeconds={smtpJobDelay}
+              onComplete={(status: JobStatus) => {
+                if (status.failed === 0) {
+                  toast({ title: `${status.sent} email${status.sent !== 1 ? "s" : ""} delivered`, description: "All emails sent successfully." });
+                } else {
+                  toast({ variant: "destructive", title: `${status.sent} sent · ${status.failed} failed`, description: "Use Retry Failed to resend failed emails." });
+                }
+              }}
+              onReset={handleReset}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -700,90 +787,6 @@ export default function LeadsImport() {
                 <Link href="/drafts"><Mail className="h-3.5 w-3.5" /> View all Gmail drafts →</Link>
               </Button>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* SMTP Send Results */}
-      <AnimatePresence>
-        {smtpSendResult && (
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden"
-          >
-            <div className="px-6 py-5 border-b border-slate-100">
-              <div className="flex items-center gap-4">
-                <div className={`h-12 w-12 rounded-2xl flex items-center justify-center flex-shrink-0 ${smtpSendResult.failed === 0 ? "bg-emerald-50" : "bg-amber-50"}`}>
-                  {smtpSendResult.failed === 0
-                    ? <CheckCircle2 className="h-6 w-6 text-emerald-600" />
-                    : <AlertCircle className="h-6 w-6 text-amber-600" />}
-                </div>
-                <div className="flex-1">
-                  <p className="font-semibold text-slate-900">
-                    {smtpSendResult.succeeded} email{smtpSendResult.succeeded !== 1 ? "s" : ""} sent via SMTP
-                    {smtpSendResult.failed > 0 && ` · ${smtpSendResult.failed} failed`}
-                  </p>
-                  <p className="text-xs text-slate-500 mt-0.5">Delivered from your mailbox to recipients' inboxes.</p>
-                </div>
-                <Button variant="outline" size="sm" onClick={handleReset} className="rounded-xl gap-1.5 flex-shrink-0">
-                  <UploadCloud className="h-3.5 w-3.5" /> New upload
-                </Button>
-              </div>
-            </div>
-
-            {/* Summary bar */}
-            <div className="px-6 py-4 grid grid-cols-3 gap-3">
-              <div className="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-100">
-                <div className="text-xl font-bold text-emerald-700">{smtpSendResult.succeeded}</div>
-                <div className="text-xs text-emerald-600 font-medium mt-0.5">Sent</div>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-red-50 border border-red-100">
-                <div className="text-xl font-bold text-red-700">{smtpSendResult.failed}</div>
-                <div className="text-xs text-red-600 font-medium mt-0.5">Failed</div>
-              </div>
-              <div className="text-center p-3 rounded-xl bg-slate-50 border border-slate-100">
-                <div className="text-xl font-bold text-slate-700">{smtpSendResult.total}</div>
-                <div className="text-xs text-slate-500 font-medium mt-0.5">Total</div>
-              </div>
-            </div>
-
-            {smtpSendResult.failed > 0 && (
-              <div className="px-6 pb-5 space-y-2">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Failed sends</p>
-                {smtpSendResult.results.filter(r => r.status === "failed").map((r, i) => (
-                  <div key={i} className="flex items-start gap-3 p-3 rounded-xl bg-red-50 border border-red-100">
-                    <XCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-slate-800 truncate">{r.email || "(no email)"}</p>
-                      <p className="text-xs text-red-600 mt-0.5">{r.error ?? "Unknown error"}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {smtpSendResult.succeeded > 0 && (
-              <div className="px-6 pb-5">
-                <details className="group">
-                  <summary className="text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer list-none flex items-center gap-1 hover:text-slate-700">
-                    <span className="group-open:hidden">▶</span><span className="hidden group-open:inline">▼</span>
-                    View sent emails ({smtpSendResult.succeeded})
-                  </summary>
-                  <div className="mt-3 space-y-2 max-h-60 overflow-y-auto">
-                    {smtpSendResult.results.filter(r => r.status === "success").map((r, i) => (
-                      <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl bg-emerald-50 border border-emerald-100">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-medium text-slate-700 truncate">{r.email}</p>
-                          <p className="text-xs text-slate-400 truncate">{r.subject}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              </div>
-            )}
           </motion.div>
         )}
       </AnimatePresence>

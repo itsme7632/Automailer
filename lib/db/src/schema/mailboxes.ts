@@ -19,6 +19,9 @@ export const mailboxesTable = pgTable("mailboxes", {
   fromName: text("from_name"),
   replyTo: text("reply_to"),
   isActive: boolean("is_active").notNull().default(true),
+  batchSize: integer("batch_size").notNull().default(10),
+  delaySeconds: integer("delay_seconds").notNull().default(15),
+  maxPerHour: integer("max_per_hour").notNull().default(100),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
