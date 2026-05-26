@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2, ShieldCheck } from "lucide-react";
 
 export default function AdminLogin() {
-  const { login, user } = useAuth();
+  const { login, logout, user } = useAuth();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [email, setEmail] = useState("");
@@ -31,8 +31,7 @@ export default function AdminLogin() {
     try {
       const loggedInUser = await login({ email, password });
       if (loggedInUser.role !== "admin") {
-        await fetch("/api/auth/logout", { method: "POST" });
-        localStorage.removeItem("auth_token");
+        await logout();
         setError("This login portal is for admin accounts only.");
         setIsSubmitting(false);
         return;

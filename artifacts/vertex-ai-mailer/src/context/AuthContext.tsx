@@ -3,6 +3,12 @@ import { User, LoginInput, RegisterInput, setAuthTokenGetter, useGetMe, getGetMe
 import { login as apiLogin, register as apiRegister, logout as apiLogout } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 
+// Register the auth token getter at module load time — BEFORE any React
+// Query hooks fire their first request. This eliminates the race condition
+// where useGetMe fires on mount before the useEffect inside AuthProvider
+// could call setAuthTokenGetter, causing 401s on page refresh.
+setAuthTokenGetter(() => localStorage.getItem("auth_token"));
+
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
@@ -17,10 +23,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(localStorage.getItem("auth_token"));
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    setAuthTokenGetter(() => localStorage.getItem("auth_token"));
-  }, []);
-
   const setToken = (newToken: string | null) => {
     if (newToken) {
       localStorage.setItem("auth_token", newToken);
@@ -30,13 +32,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setTokenState(newToken);
   };
 
-  const { data: user = null, isLoading } = useGetMe({
+  const { data: user = null, isLoading, isError } = useGetMe({
     query: {
       enabled: !!token,
       retry: false,
       queryKey: getGetMeQueryKey(),
     }
   });
+
+  // If the stored token is invalid/expired (401), clear it so the user
+  // is properly redirected to login instead of being stuck in a loading loop.
+  useEffect(() => {
+    if (isError && token) {
+      setToken(null);
+      queryClient.setQueryData(getGetMeQueryKey(), null);
+      queryClient.clear();
+    }
+  }, [isError, token]);
 
   const login = async (data: LoginInput): Promise<User> => {
     const res = await apiLogin(data);
