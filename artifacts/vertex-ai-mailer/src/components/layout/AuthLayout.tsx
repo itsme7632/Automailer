@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
 import { Link } from "wouter";
-import { Zap, CheckCircle } from "lucide-react";
+import { CheckCircle, Zap } from "lucide-react";
 
 const FEATURES = [
   "Import thousands of leads from CSV or XLSX",
@@ -16,11 +16,13 @@ export function AuthLayout({ children }: { children: ReactNode }) {
       <div className="flex flex-col justify-center w-full lg:w-[480px] flex-shrink-0 px-8 py-12 lg:px-16 border-r border-slate-100">
         <div className="w-full max-w-sm mx-auto">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 mb-10">
-            <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
-              <Zap className="h-5 w-5 text-white" />
-            </div>
-            <span className="font-bold text-xl text-slate-900 tracking-tight">BrokerMail AI</span>
+          <Link href="/" className="flex items-center mb-10">
+            <img
+              src="/logo-horizontal.png"
+              alt="BrokerMail AI"
+              className="h-11 w-auto object-contain"
+              style={{ maxWidth: "200px" }}
+            />
           </Link>
           {children}
         </div>
@@ -58,11 +60,15 @@ export function AuthLayout({ children }: { children: ReactNode }) {
             ))}
           </div>
 
-          {/* Decorative card mockup */}
+          {/* Decorative card mockup using square logo icon */}
           <div className="mt-14 rounded-2xl bg-white/10 border border-white/20 backdrop-blur-sm p-6">
             <div className="flex items-center gap-3 mb-4">
-              <div className="h-9 w-9 rounded-full bg-white/20 flex items-center justify-center">
-                <Zap className="h-4 w-4 text-white" />
+              <div className="h-9 w-9 rounded-xl overflow-hidden flex-shrink-0 bg-white/10 flex items-center justify-center">
+                <img
+                  src="/logo-icon.png"
+                  alt="BrokerMail AI"
+                  className="h-8 w-8 object-contain rounded-lg"
+                />
               </div>
               <div>
                 <div className="h-2.5 w-28 bg-white/40 rounded-full mb-1.5" />

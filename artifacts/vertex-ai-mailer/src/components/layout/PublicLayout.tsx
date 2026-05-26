@@ -1,6 +1,5 @@
 import { Link, useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Zap } from "lucide-react";
 
 const navLinks = [
   { href: "/pricing", label: "Pricing" },
@@ -19,11 +18,13 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
         <div className="container mx-auto px-5 h-16 flex items-center justify-between max-w-6xl">
           <div className="flex items-center gap-6">
             <Link href="/">
-              <div className="flex items-center gap-2.5 cursor-pointer">
-                <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
-                  <Zap className="h-4 w-4 text-white" />
-                </div>
-                <span className="font-bold text-slate-900 tracking-tight">BrokerMail AI</span>
+              <div className="flex items-center cursor-pointer">
+                <img
+                  src="/logo-horizontal.png"
+                  alt="BrokerMail AI"
+                  className="h-10 w-auto object-contain"
+                  style={{ maxWidth: "180px" }}
+                />
               </div>
             </Link>
             <nav className="hidden md:flex items-center gap-1">
@@ -60,11 +61,13 @@ export function PublicLayout({ children }: { children: React.ReactNode }) {
       <footer className="py-10 border-t border-slate-100 bg-white">
         <div className="container mx-auto px-5 max-w-6xl">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-2">
-              <div className="h-6 w-6 rounded-md bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
-                <Zap className="h-3.5 w-3.5 text-white" />
-              </div>
-              <span className="font-semibold text-slate-900 text-sm">BrokerMail AI</span>
+            <div className="flex items-center">
+              <img
+                src="/logo-horizontal.png"
+                alt="BrokerMail AI"
+                className="h-8 w-auto object-contain"
+                style={{ maxWidth: "140px" }}
+              />
             </div>
             <nav className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
               {navLinks.map(({ href, label }) => (

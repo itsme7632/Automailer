@@ -4,7 +4,7 @@ import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, ShieldCheck, Zap } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 
 export default function AdminLogin() {
   const { login, user } = useAuth();
@@ -15,7 +15,6 @@ export default function AdminLogin() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // If already logged in as admin, redirect immediately
   if (user?.role === "admin") {
     setLocation("/admin/dashboard");
     return null;
@@ -32,7 +31,6 @@ export default function AdminLogin() {
     try {
       const loggedInUser = await login({ email, password });
       if (loggedInUser.role !== "admin") {
-        // Logged in but not admin — reject and clear
         await fetch("/api/auth/logout", { method: "POST" });
         localStorage.removeItem("auth_token");
         setError("This login portal is for admin accounts only.");
@@ -51,11 +49,20 @@ export default function AdminLogin() {
       <div className="w-full max-w-sm">
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-lg shadow-blue-500/25 mb-4">
-            <Zap className="h-7 w-7 text-white" />
+          <div className="mb-4 p-3 rounded-2xl bg-white/5 border border-white/10">
+            <img
+              src="/logo-icon.png"
+              alt="BrokerMail AI"
+              className="h-16 w-16 object-contain rounded-xl"
+            />
           </div>
-          <h1 className="text-white text-xl font-bold tracking-tight">BrokerMail AI</h1>
-          <div className="flex items-center gap-1.5 mt-2">
+          <img
+            src="/logo-horizontal.png"
+            alt="BrokerMail AI"
+            className="h-9 w-auto object-contain brightness-0 invert"
+            style={{ maxWidth: "180px" }}
+          />
+          <div className="flex items-center gap-1.5 mt-3">
             <ShieldCheck className="h-3.5 w-3.5 text-blue-400" />
             <span className="text-blue-400 text-xs font-medium tracking-wider uppercase">Admin Portal</span>
           </div>

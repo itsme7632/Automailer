@@ -8,7 +8,6 @@ import {
   Settings,
   ShieldAlert,
   LogOut,
-  Zap,
   ChevronUp,
   Menu,
   X,
@@ -80,14 +79,16 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
     <div className="flex flex-col h-full bg-white border-r border-slate-200 w-60">
       {/* Logo */}
       <div className="h-16 flex items-center px-5 border-b border-slate-100">
-        <Link href="/dashboard" className="flex items-center gap-2.5">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center shadow-sm">
-            <Zap className="h-4 w-4 text-white" />
-          </div>
-          <span className="font-semibold text-slate-900 tracking-tight">BrokerMail AI</span>
+        <Link href="/dashboard" className="flex items-center flex-1 min-w-0">
+          <img
+            src="/logo-horizontal.png"
+            alt="BrokerMail AI"
+            className="h-9 w-auto object-contain"
+            style={{ maxWidth: "160px" }}
+          />
         </Link>
         {onClose && (
-          <button onClick={onClose} className="ml-auto p-1.5 rounded hover:bg-slate-100 text-slate-400">
+          <button onClick={onClose} className="ml-auto p-1.5 rounded hover:bg-slate-100 text-slate-400 flex-shrink-0">
             <X className="h-4 w-4" />
           </button>
         )}
@@ -184,12 +185,14 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           >
             <Menu className="h-5 w-5" />
           </button>
-          <div className="flex items-center gap-2">
-            <div className="h-6 w-6 rounded bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center">
-              <Zap className="h-3.5 w-3.5 text-white" />
-            </div>
-            <span className="font-semibold text-slate-900 text-sm">BrokerMail AI</span>
-          </div>
+          <Link href="/dashboard">
+            <img
+              src="/logo-horizontal.png"
+              alt="BrokerMail AI"
+              className="h-8 w-auto object-contain"
+              style={{ maxWidth: "140px" }}
+            />
+          </Link>
         </header>
 
         <main className="flex-1 overflow-auto">
