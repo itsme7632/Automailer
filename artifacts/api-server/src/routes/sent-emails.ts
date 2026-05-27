@@ -3,7 +3,7 @@ import {
   db, emailQueueTable, draftsTable, mailboxesTable, usersTable, templatesTable,
   emailTrackingEventsTable,
 } from "@workspace/db";
-import { eq, and, count, desc, sql, inArray } from "drizzle-orm";
+import { eq, and, count, desc, sql, inArray, ilike, or } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import {
   buildHtmlEmail, replaceVarsText, type EmailStyle, type BrandingSettings,
@@ -14,6 +14,7 @@ const router: IRouter = Router();
 
 function userBranding(user: User): BrandingSettings {
   return {
+    agentName:      user.agentName      ?? null,
     companyName:    user.companyName    ?? null,
     companyTagline: user.companyTagline ?? null,
     companyPhone:   user.companyPhone   ?? null,
@@ -82,48 +83,81 @@ router.get("/sent-emails", requireAuth, async (req, res): Promise<void> => {
   const page       = parseInt(req.query.page as string, 10) || 1;
   const limit      = Math.min(parseInt(req.query.limit as string, 10) || 25, 100);
   const campaignId = req.query.campaignId ? parseInt(req.query.campaignId as string, 10) : undefined;
+  const search     = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
 
-  const conditions: any[] = [
+  const baseConditions: any[] = [
     eq(emailQueueTable.userId, user.id),
     eq(emailQueueTable.status, "success"),
   ];
-  if (campaignId) conditions.push(eq(emailQueueTable.campaignId, campaignId));
+  if (campaignId) baseConditions.push(eq(emailQueueTable.campaignId, campaignId));
 
-  const [totalRow] = await db
-    .select({ count: count() })
-    .from(emailQueueTable)
-    .where(and(...conditions));
+  const selectCols = {
+    id:                  emailQueueTable.id,
+    jobId:               emailQueueTable.jobId,
+    campaignId:          emailQueueTable.campaignId,
+    leadId:              emailQueueTable.leadId,
+    email:               emailQueueTable.email,
+    subject:             emailQueueTable.subject,
+    rowDataJson:         emailQueueTable.rowDataJson,
+    templateId:          emailQueueTable.templateId,
+    style:               emailQueueTable.style,
+    useSignatureBuilder: emailQueueTable.useSignatureBuilder,
+    status:              emailQueueTable.status,
+    sentAt:              emailQueueTable.sentAt,
+    quoteId:             emailQueueTable.quoteId,
+    trackingId:          emailQueueTable.trackingId,
+    mailboxEmail:        mailboxesTable.smtpUser,
+    mailboxFromName:     mailboxesTable.fromName,
+  };
 
-  const items = await db
-    .select({
-      id:                 emailQueueTable.id,
-      jobId:              emailQueueTable.jobId,
-      campaignId:         emailQueueTable.campaignId,
-      leadId:             emailQueueTable.leadId,
-      email:              emailQueueTable.email,
-      subject:            emailQueueTable.subject,
-      rowDataJson:        emailQueueTable.rowDataJson,
-      templateId:         emailQueueTable.templateId,
-      style:              emailQueueTable.style,
-      useSignatureBuilder: emailQueueTable.useSignatureBuilder,
-      status:             emailQueueTable.status,
-      sentAt:             emailQueueTable.sentAt,
-      trackingId:         emailQueueTable.trackingId,
-      mailboxEmail:       mailboxesTable.smtpUser,
-      mailboxFromName:    mailboxesTable.fromName,
-    })
-    .from(emailQueueTable)
-    .leftJoin(mailboxesTable, eq(mailboxesTable.id, emailQueueTable.mailboxId))
-    .where(and(...conditions))
-    .orderBy(desc(emailQueueTable.sentAt))
-    .limit(limit)
-    .offset((page - 1) * limit);
+  let items: (typeof selectCols extends Record<string, unknown> ? any : any)[];
+  let totalCount: number;
 
-  const trackingIds = items.filter(i => i.trackingId).map(i => i.trackingId!);
+  if (search) {
+    // Fetch all records for in-memory filtering (name is in rowDataJson)
+    const allItems = await db
+      .select(selectCols)
+      .from(emailQueueTable)
+      .leftJoin(mailboxesTable, eq(mailboxesTable.id, emailQueueTable.mailboxId))
+      .where(and(...baseConditions))
+      .orderBy(desc(emailQueueTable.sentAt))
+      .limit(5000);
+
+    const filtered = allItems.filter(item => {
+      let row: Record<string, string> = {};
+      try { row = JSON.parse(item.rowDataJson); } catch { }
+      const name = (row.name ?? row.companyName ?? "").toLowerCase();
+      return (
+        item.email.toLowerCase().includes(search) ||
+        (item.quoteId ?? "").toLowerCase().includes(search) ||
+        name.includes(search)
+      );
+    });
+
+    totalCount = filtered.length;
+    items      = filtered.slice((page - 1) * limit, page * limit);
+  } else {
+    const [totalRow] = await db
+      .select({ count: count() })
+      .from(emailQueueTable)
+      .where(and(...baseConditions));
+    totalCount = totalRow.count;
+
+    items = await db
+      .select(selectCols)
+      .from(emailQueueTable)
+      .leftJoin(mailboxesTable, eq(mailboxesTable.id, emailQueueTable.mailboxId))
+      .where(and(...baseConditions))
+      .orderBy(desc(emailQueueTable.sentAt))
+      .limit(limit)
+      .offset((page - 1) * limit);
+  }
+
+  const trackingIds = items.filter((i: any) => i.trackingId).map((i: any) => i.trackingId!);
   const tracking    = await getTrackingStatsForIds(trackingIds);
 
   res.json({
-    data: items.map(item => {
+    data: items.map((item: any) => {
       let row: Record<string, string> = {};
       try { row = JSON.parse(item.rowDataJson); } catch { }
       const stats = item.trackingId ? (tracking[item.trackingId] ?? null) : null;
@@ -133,6 +167,7 @@ router.get("/sent-emails", requireAuth, async (req, res): Promise<void> => {
         leadId:         item.leadId,
         email:          item.email,
         customerName:   row.name ?? row.companyName ?? null,
+        quoteId:        item.quoteId ?? row.quote_id ?? null,
         subject:        item.subject,
         sentAt:         item.sentAt?.toISOString() ?? null,
         mailboxEmail:   item.mailboxEmail ?? null,
@@ -146,7 +181,7 @@ router.get("/sent-emails", requireAuth, async (req, res): Promise<void> => {
         lastOpenedAt:   stats?.lastOpenedAt ?? null,
       };
     }),
-    total: totalRow.count,
+    total: totalCount,
     page,
     limit,
   });

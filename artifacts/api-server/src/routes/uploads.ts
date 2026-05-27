@@ -76,6 +76,10 @@ function detectField(header: string): string | null {
   if (["notes", "note", "comments", "comment", "remarks", "details",
        "additionalinfo", "extra", "description", "instructions"].includes(n)) return "notes";
 
+  // ── Quote ID ───────────────────────────────────────────────────────────────
+  if (["quoteid", "quote_id", "quotenumber", "quotenum", "quoten",
+       "quoteref", "quotereference", "ordernumber", "orderid"].includes(n)) return "quote_id";
+
   return null;
 }
 
@@ -134,7 +138,7 @@ function mapRow(
   const mapped: Record<string, string | null> = {
     name: null, email: null, vehicle: null, route: null,
     pickup: null, delivery: null, price: null, notes: null,
-    company: null, phone: null,
+    company: null, phone: null, quote_id: null,
   };
 
   for (const header of headers) {
@@ -230,7 +234,7 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
   const duplicateRows = parsedRows.filter(r => r.isDuplicate).length;
 
   // Report which standard fields were successfully auto-detected
-  const STANDARD_FIELDS = ["name","email","vehicle","pickup","delivery","price","route","company","phone","notes"];
+  const STANDARD_FIELDS = ["name","email","vehicle","pickup","delivery","price","route","company","phone","notes","quote_id"];
   const firstRow = (parsedRows[0] ?? {}) as Record<string, unknown>;
   const detectedFields = STANDARD_FIELDS.filter(k => {
     const v = firstRow[k];

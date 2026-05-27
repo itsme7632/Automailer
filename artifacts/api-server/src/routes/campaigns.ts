@@ -31,6 +31,7 @@ function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
 function userBranding(user: User): BrandingSettings {
   return {
+    agentName:      user.agentName      ?? null,
     companyName:    user.companyName    ?? null,
     companyTagline: user.companyTagline ?? null,
     companyPhone:   user.companyPhone   ?? null,
@@ -318,6 +319,7 @@ router.post("/campaigns/from-upload", requireAuth, async (req, res): Promise<voi
       delivery:   typeof row.delivery === "string" ? row.delivery || null : null,
       price:      typeof row.price === "string" ? row.price || null : null,
       notes:      typeof row.notes === "string" ? row.notes || null : null,
+      quoteId:    typeof row.quote_id === "string" ? row.quote_id || null : null,
       status:     "new",
     });
     valid++;
@@ -485,6 +487,7 @@ router.post("/campaigns/:id/send-batch", requireAuth, async (req, res): Promise<
         delivery: lead.delivery ?? "",
         price: lead.price ?? "",
         notes: lead.notes ?? "",
+        quote_id: lead.quoteId ?? "",
       };
 
       const subject = replaceVarsText(template.subject, row);
@@ -501,6 +504,7 @@ router.post("/campaigns/:id/send-batch", requireAuth, async (req, res): Promise<
         rowDataJson:        JSON.stringify(row),
         style:              emailStyle,
         useSignatureBuilder: useSig,
+        quoteId:            lead.quoteId ?? null,
         status:             "pending",
       });
     }

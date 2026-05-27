@@ -16,7 +16,7 @@ import { ArrowLeft, Save, Loader2, Eye, Code2 } from "lucide-react";
 // Lead variables only — branding is applied automatically from Settings
 const CHIPS = [
   "{name}", "{email}", "{vehicle}", "{pickup}", "{delivery}",
-  "{price}", "{route}", "{agent_name}", "{notes}",
+  "{price}", "{route}", "{quote_id}", "{agent_name}", "{notes}",
 ];
 
 // Generic sample data — NO hardcoded company names
@@ -28,6 +28,7 @@ const SAMPLE_ROW: Record<string, string> = {
   delivery:   "Seattle, WA",
   price:      "$1,250",
   route:      "FL → WA",
+  quote_id:   "QT-10042",
   agent_name: "Your Name",
   notes:      "Enclosed transport preferred",
 };
@@ -255,7 +256,7 @@ export default function TemplateEditor() {
             <div className="p-6 flex-1 space-y-6 bg-white min-h-[300px]">
               <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-100 rounded-xl text-xs text-blue-700">
                 <span className="font-medium">Sample data:</span>
-                <span className="text-blue-600">Alex Johnson · Tesla Model Y · Miami → Seattle · $1,250</span>
+                <span className="text-blue-600">Alex Johnson · Tesla Model Y · Miami → Seattle · $1,250 · #QT-10042</span>
               </div>
 
               {subject ? (

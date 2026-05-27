@@ -9,6 +9,7 @@ router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
   const [row] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
   res.json({
+    agentName:      row?.agentName      ?? "",
     companyName:    row?.companyName    ?? "",
     companyTagline: row?.companyTagline ?? "",
     companyWebsite: row?.companyWebsite ?? "",
@@ -23,6 +24,7 @@ router.get("/users/branding", requireAuth, async (req, res): Promise<void> => {
 router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
   const {
+    agentName,
     companyName,
     companyTagline,
     companyWebsite,
@@ -32,6 +34,7 @@ router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
     accentColor,
     useSignature,
   } = req.body as {
+    agentName?:      string;
     companyName?:    string;
     companyTagline?: string;
     companyWebsite?: string;
@@ -43,6 +46,7 @@ router.put("/users/branding", requireAuth, async (req, res): Promise<void> => {
   };
 
   await db.update(usersTable).set({
+    agentName:      agentName?.trim()      || null,
     companyName:    companyName?.trim()    || null,
     companyTagline: companyTagline?.trim() || null,
     companyWebsite: companyWebsite?.trim() || null,

@@ -25,6 +25,7 @@ export const usersTable = pgTable("users", {
   usdot: text("usdot"),
   mcNumber: text("mc_number"),
   accentColor: text("accent_color"),
+  agentName: text("agent_name"),
   useSignature: boolean("use_signature").notNull().default(false),
   // ── Plan / Credits / Status ───────────────────────────────────────────────
   plan: text("plan").notNull().default("free"),

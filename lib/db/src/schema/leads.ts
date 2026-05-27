@@ -16,6 +16,7 @@ export const leadsTable = pgTable("leads", {
   delivery: text("delivery"),
   price: text("price"),
   notes: text("notes"),
+  quoteId: text("quote_id"),
   status: text("status").notNull().default("new"),
   gmailDraftId: text("gmail_draft_id"),
   errorMessage: text("error_message"),

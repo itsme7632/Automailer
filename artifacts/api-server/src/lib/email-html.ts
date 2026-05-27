@@ -14,6 +14,7 @@ export type EmailStyle = "clean" | "modern" | "minimal" | "luxury";
 
 /** User's company settings — drives header and optional signature automatically */
 export interface BrandingSettings {
+  agentName?:      string | null;
   companyName?:    string | null;
   companyTagline?: string | null;
   companyPhone?:   string | null;
@@ -80,6 +81,7 @@ function replaceVarsHtml(text: string, row: Record<string, string>): string {
     if (k === "price")    return `<strong style="color:#059669;font-size:16px;">${esc}</strong>`;
     if (["vehicle", "pickup", "delivery", "route"].includes(k)) return `<strong>${esc}</strong>`;
     if (k === "name")     return `<strong>${esc}</strong>`;
+    if (k === "quote_id") return `<strong style="color:#7c3aed;">${esc}</strong>`;
     return esc;
   });
 }
@@ -129,18 +131,21 @@ ${extraCss}
 
 /**
  * Builds the optional auto-signature from branding settings.
- * `agentName` comes from row.agent_name (per-lead, optional CSV column).
+ * `agentNameOverride` comes from row.agent_name (per-lead CSV column).
+ * Falls back to branding.agentName when CSV column is not present.
  * All company details come from BrandingSettings — not template variables.
  * Returns empty string if nothing meaningful to show.
  */
 function buildSignatureHtml(
-  agentName: string,
+  agentNameOverride: string,
   branding: BrandingSettings,
   borderColor: string,
   fontFamily: string
 ): string {
-  const name    = agentName?.trim()              ? escapeHtml(agentName.trim())              : "";
+  const rawName = agentNameOverride?.trim() || branding.agentName?.trim() || "";
+  const name    = rawName                        ? escapeHtml(rawName)                        : "";
   const company = branding.companyName?.trim()   ? escapeHtml(branding.companyName.trim())   : "";
+  const tagline = branding.companyTagline?.trim()? escapeHtml(branding.companyTagline.trim()): "";
   const phone   = branding.companyPhone?.trim()  ? escapeHtml(branding.companyPhone.trim())  : "";
   const website = branding.companyWebsite?.trim()? escapeHtml(branding.companyWebsite.trim()): "";
   const usdot   = branding.usdot?.trim()         ? escapeHtml(branding.usdot.trim())         : "";
@@ -150,7 +155,12 @@ function buildSignatureHtml(
 
   const lines: string[] = [];
   if (name)    lines.push(`<strong style="color:#1e293b;font-size:14px;">${name}</strong>`);
-  if (company) lines.push(`<span style="color:#374151;">${company}</span>`);
+  if (company) {
+    const companyLine = tagline
+      ? `<span style="color:#374151;">${company}</span> <span style="color:#94a3b8;font-size:12px;">${tagline}</span>`
+      : `<span style="color:#374151;">${company}</span>`;
+    lines.push(companyLine);
+  }
   if (phone)   lines.push(phone);
   if (website) {
     const href = /^https?:\/\//.test(website) ? website : `https://${website}`;

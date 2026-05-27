@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Loader2, CheckCircle2, Mail, Cpu, Database, Key, AlertCircle,
-  RefreshCw, Building2, Globe, Phone, Hash, Palette, PenLine,
+  RefreshCw, Building2, Globe, Phone, Hash, Palette, PenLine, User,
 } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -20,8 +20,8 @@ interface DiagnosticsResult {
 }
 
 interface BrandingData {
-  companyName: string; companyTagline: string; companyWebsite: string; companyPhone: string;
-  usdot: string; mcNumber: string; accentColor: string; useSignature: boolean;
+  agentName: string; companyName: string; companyTagline: string; companyWebsite: string;
+  companyPhone: string; usdot: string; mcNumber: string; accentColor: string; useSignature: boolean;
 }
 
 function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
@@ -37,12 +37,13 @@ function StatusBadge({ ok, label }: { ok: boolean; label: string }) {
 
 /** Variables users put inside template bodies */
 const TEMPLATE_VARIABLES = [
-  { var: "{name}",     desc: "Recipient's name" },
-  { var: "{vehicle}",  desc: "Vehicle (year/make/model)" },
-  { var: "{pickup}",   desc: "Pickup location" },
-  { var: "{delivery}", desc: "Delivery location" },
-  { var: "{price}",    desc: "Transport price (auto-formats)" },
-  { var: "{route}",    desc: "Route summary" },
+  { var: "{name}",       desc: "Recipient's name" },
+  { var: "{vehicle}",    desc: "Vehicle (year/make/model)" },
+  { var: "{pickup}",     desc: "Pickup location" },
+  { var: "{delivery}",   desc: "Delivery location" },
+  { var: "{price}",      desc: "Transport price (auto-formats)" },
+  { var: "{route}",      desc: "Route summary" },
+  { var: "{quote_id}",   desc: "Quote / order ID from CSV" },
   { var: "{agent_name}", desc: "Sending agent's name (CSV column)" },
 ];
 
@@ -61,7 +62,7 @@ export default function Settings() {
 
   // Branding
   const [branding, setBranding] = useState<BrandingData>({
-    companyName: "", companyTagline: "", companyWebsite: "", companyPhone: "",
+    agentName: "", companyName: "", companyTagline: "", companyWebsite: "", companyPhone: "",
     usdot: "", mcNumber: "", accentColor: "", useSignature: false,
   });
   const [isSavingBranding, setIsSavingBranding] = useState(false);
@@ -166,6 +167,18 @@ export default function Settings() {
             <div className="grid sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
                 <label className="text-sm font-medium flex items-center gap-1.5">
+                  <User className="h-3.5 w-3.5 text-muted-foreground" /> Agent Name
+                </label>
+                <Input
+                  value={branding.agentName}
+                  onChange={e => setBranding(b => ({ ...b, agentName: e.target.value }))}
+                  placeholder="e.g. Sarah Mitchell"
+                  className="rounded-xl"
+                />
+                <p className="text-xs text-muted-foreground">Used in signature when no agent_name column in CSV</p>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium flex items-center gap-1.5">
                   <Building2 className="h-3.5 w-3.5 text-muted-foreground" /> Company Name
                 </label>
                 <Input
@@ -260,7 +273,7 @@ export default function Settings() {
                     <p className="text-sm font-medium text-slate-800">Automatic Signature</p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       {branding.useSignature
-                        ? "On — phone, website, USDOT & MC# are appended to every draft automatically"
+                        ? "On — agent name, company, tagline, phone, website & credentials appended automatically"
                         : "Off — template content is sent exactly as written, no additions"}
                     </p>
                   </div>
@@ -286,7 +299,7 @@ export default function Settings() {
               <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
                 <p className="text-xs font-semibold text-blue-800 mb-1">Automatic — no variables needed</p>
                 <p className="text-xs text-blue-700 leading-relaxed">
-                  Your company name appears in the email header automatically. When "Automatic Signature" is enabled above, phone, website, USDOT, and MC# are appended to every draft.
+                  Your company name appears in the email header automatically. When "Automatic Signature" is enabled, your agent name, company tagline, phone, website, USDOT, and MC# are appended to every email.
                 </p>
               </div>
               <div>

@@ -4,16 +4,18 @@ import { useAuth } from "@/context/AuthContext";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Eye, Mail, CheckCircle2, Clock, AlertCircle, ChevronRight,
-  User, AtSign, Calendar, Server, BarChart3,
+  User, AtSign, Calendar, Server, BarChart3, Search, Hash, X,
 } from "lucide-react";
 
 type SentEmail = {
   id: number;
   email: string;
   customerName: string | null;
+  quoteId: string | null;
   subject: string;
   sentAt: string | null;
   mailboxEmail: string | null;
@@ -209,16 +211,33 @@ function EmailPreviewModal({
 }
 
 export default function SentEmails() {
-  const [page, setPage] = useState(1);
+  const [page, setPage]       = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [activeSearch, setActiveSearch] = useState("");
 
   const { data, isLoading } = useQuery({
-    queryKey: ["sent-emails", page],
-    queryFn: () =>
-      apiFetch<{ data: SentEmail[]; total: number; page: number; limit: number }>(
-        `/api/sent-emails?page=${page}&limit=25`
-      ),
+    queryKey: ["sent-emails", page, activeSearch],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: String(page), limit: "25" });
+      if (activeSearch) params.set("search", activeSearch);
+      return apiFetch<{ data: SentEmail[]; total: number; page: number; limit: number }>(
+        `/api/sent-emails?${params}`
+      );
+    },
   });
+
+  function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    setPage(1);
+    setActiveSearch(searchInput.trim());
+  }
+
+  function handleClearSearch() {
+    setSearchInput("");
+    setActiveSearch("");
+    setPage(1);
+  }
 
   const emails  = data?.data ?? [];
   const total   = data?.total ?? 0;
@@ -251,10 +270,10 @@ export default function SentEmails() {
       {/* Stats row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Total Sent",    value: total,                                        color: "blue",   icon: <Mail className="h-4 w-4 text-blue-500" /> },
-          { label: "Opened",        value: opened,                                       color: "emerald", icon: <Eye className="h-4 w-4 text-emerald-500" /> },
-          { label: "Multi-Open",    value: emails.filter(e => e.openCount > 1).length,   color: "violet", icon: <Eye className="h-4 w-4 text-violet-500" /> },
-          { label: "Open Rate",     value: total > 0 ? `${openRate}%` : "—",             color: "amber",  icon: <BarChart3 className="h-4 w-4 text-amber-500" /> },
+          { label: "Total Sent",  value: total,                                        color: "blue",   icon: <Mail className="h-4 w-4 text-blue-500" /> },
+          { label: "Opened",      value: opened,                                       color: "emerald", icon: <Eye className="h-4 w-4 text-emerald-500" /> },
+          { label: "Multi-Open",  value: emails.filter(e => e.openCount > 1).length,   color: "violet", icon: <Eye className="h-4 w-4 text-violet-500" /> },
+          { label: "Open Rate",   value: total > 0 ? `${openRate}%` : "—",             color: "amber",  icon: <BarChart3 className="h-4 w-4 text-amber-500" /> },
         ].map(s => (
           <div key={s.label} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">
             <div className="mb-2">{s.icon}</div>
@@ -264,6 +283,41 @@ export default function SentEmails() {
         ))}
       </div>
 
+      {/* Search bar */}
+      <form onSubmit={handleSearch} className="flex gap-2">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+          <Input
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            placeholder="Search by email, name, or quote ID…"
+            className="pl-9 rounded-xl border-slate-200"
+          />
+          {searchInput && (
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+        <Button type="submit" variant="outline" className="rounded-xl gap-1.5 shrink-0">
+          <Search className="h-3.5 w-3.5" /> Search
+        </Button>
+        {activeSearch && (
+          <Button type="button" variant="ghost" onClick={handleClearSearch} className="rounded-xl text-slate-500 text-sm shrink-0">
+            Clear
+          </Button>
+        )}
+      </form>
+      {activeSearch && (
+        <p className="text-xs text-slate-500 -mt-3">
+          Showing results for <strong>"{activeSearch}"</strong> — {total} match{total !== 1 ? "es" : ""}
+        </p>
+      )}
+
       {/* Table */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
@@ -271,6 +325,7 @@ export default function SentEmails() {
             <TableHeader>
               <TableRow className="bg-slate-50/70">
                 <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide">Recipient</TableHead>
+                <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide hidden xl:table-cell">Quote ID</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide hidden sm:table-cell">Subject</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide hidden md:table-cell">Mailbox</TableHead>
                 <TableHead className="font-semibold text-slate-600 text-xs uppercase tracking-wide hidden lg:table-cell">Sent</TableHead>
@@ -282,7 +337,7 @@ export default function SentEmails() {
               {isLoading ? (
                 Array(6).fill(0).map((_, i) => (
                   <TableRow key={i}>
-                    {[1, 2, 3, 4, 5].map(j => (
+                    {[1, 2, 3, 4, 5, 6].map(j => (
                       <TableCell key={j}><Skeleton className="h-4 w-full" /></TableCell>
                     ))}
                     <TableCell />
@@ -290,11 +345,15 @@ export default function SentEmails() {
                 ))
               ) : emails.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center h-40 text-slate-400">
+                  <TableCell colSpan={7} className="text-center h-40 text-slate-400">
                     <div className="flex flex-col items-center gap-2">
                       <Mail className="h-8 w-8 text-slate-200" />
-                      <p className="text-sm font-medium">No sent emails yet</p>
-                      <p className="text-xs">Emails sent via SMTP campaigns will appear here with open tracking.</p>
+                      <p className="text-sm font-medium">
+                        {activeSearch ? "No emails match your search" : "No sent emails yet"}
+                      </p>
+                      <p className="text-xs">
+                        {activeSearch ? "Try a different search term" : "Emails sent via SMTP campaigns will appear here with open tracking."}
+                      </p>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -313,6 +372,15 @@ export default function SentEmails() {
                         <AtSign className="h-2.5 w-2.5 flex-shrink-0 text-slate-400" />
                         <span className="truncate max-w-[160px]">{email.email}</span>
                       </div>
+                    </TableCell>
+                    <TableCell className="hidden xl:table-cell">
+                      {email.quoteId ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-violet-50 border border-violet-100 text-xs font-mono text-violet-700">
+                          <Hash className="h-2.5 w-2.5" />{email.quoteId}
+                        </span>
+                      ) : (
+                        <span className="text-slate-300 text-xs">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="hidden sm:table-cell">
                       <div className="text-sm text-slate-800 truncate max-w-xs">{email.subject}</div>
