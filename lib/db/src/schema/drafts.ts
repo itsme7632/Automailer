@@ -11,6 +11,7 @@ export const draftsTable = pgTable("drafts", {
   campaignId: integer("campaign_id").references(() => campaignsTable.id, { onDelete: "set null" }),
   leadId: integer("lead_id").references(() => leadsTable.id, { onDelete: "set null" }),
   gmailDraftId: text("gmail_draft_id"),
+  email: text("email"),
   subject: text("subject").notNull(),
   body: text("body").notNull(),
   status: text("status").notNull().default("pending"),

@@ -19,6 +19,7 @@ export const emailQueueTable = pgTable("email_queue", {
   status: text("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
   lastError: text("last_error"),
+  trackingId: text("tracking_id"),
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

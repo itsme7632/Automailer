@@ -13,6 +13,7 @@ import {
   X,
   Server,
   CreditCard,
+  SendHorizonal,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -26,11 +27,12 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",    icon: LayoutDashboard, label: "Dashboard",     exact: true },
-  { href: "/templates",    icon: FileText,        label: "Templates",     exact: false },
-  { href: "/leads/import", icon: UploadCloud,     label: "Upload & Send", exact: true },
-  { href: "/drafts",       icon: Mail,            label: "Gmail Drafts",  exact: false },
-  { href: "/mailbox",      icon: Server,          label: "Mailbox",       exact: true },
+  { href: "/dashboard",    icon: LayoutDashboard, label: "Dashboard",       exact: true },
+  { href: "/templates",    icon: FileText,        label: "Templates",       exact: false },
+  { href: "/leads/import", icon: UploadCloud,     label: "Upload & Send",   exact: true },
+  { href: "/sent-emails",  icon: SendHorizonal,   label: "Sent Emails",     exact: false },
+  { href: "/drafts",       icon: Mail,            label: "Gmail Drafts",    exact: false },
+  { href: "/mailbox",      icon: Server,          label: "Mailbox",         exact: true },
   { href: "/plans",        icon: CreditCard,      label: "Plans & Billing", exact: true },
 ];
 

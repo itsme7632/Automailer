@@ -26,6 +26,9 @@ import Plans from "@/pages/Plans";
 import Admin from "@/pages/Admin";
 import AdminLogin from "@/pages/AdminLogin";
 import NotFound from "@/pages/not-found";
+import SentEmails from "@/pages/SentEmails";
+import Campaigns from "@/pages/Campaigns";
+import CampaignDetail from "@/pages/CampaignDetail";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -87,6 +90,24 @@ function Router() {
       <Route path="/templates/:id">
         <ProtectedRoute>
           <AppLayout><TemplateEditor /></AppLayout>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/sent-emails">
+        <ProtectedRoute>
+          <AppLayout><SentEmails /></AppLayout>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/campaigns/:id">
+        <ProtectedRoute>
+          <AppLayout><CampaignDetail /></AppLayout>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/campaigns">
+        <ProtectedRoute>
+          <AppLayout><Campaigns /></AppLayout>
         </ProtectedRoute>
       </Route>
 

@@ -4,7 +4,8 @@ import {
   activityTable, usersTable, emailQueueTable, campaignBatchesTable,
   mailboxesTable,
 } from "@workspace/db";
-import { eq, and, count, sql, desc, gte } from "drizzle-orm";
+import { eq, and, count, sql, desc, gte, inArray } from "drizzle-orm";
+import { emailTrackingEventsTable } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import {
   CreateCampaignBody, UpdateCampaignBody, GetCampaignParams,
@@ -114,22 +115,32 @@ export async function processCampaignJobQueue(
         useSignatureBuilder: item.useSignatureBuilder,
       });
 
+      // Generate trackingId before send so we can inject pixel
+      const trackingId  = randomUUID();
+      const publicBase  = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (process.env.PUBLIC_URL ?? "http://localhost:3000");
+      const pixelTag    = `<img src="${publicBase}/api/track/open/${trackingId}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0;" />`;
+      const trackedHtml = bodyHtml.includes("</body>")
+        ? bodyHtml.replace(/<\/body>/i, `${pixelTag}</body>`)
+        : bodyHtml + pixelTag;
+
       try {
-        const info = await sendEmail(box, { to: item.email, subject, text: bodyText, html: bodyHtml });
+        const info = await sendEmail(box, { to: item.email, subject, text: bodyText, html: trackedHtml });
 
         if (box.imapHost && box.imapUser && box.imapPassEncrypted) {
           const raw = buildRawMessage({
             from: fromAddress, to: item.email, subject,
-            html: bodyHtml, text: bodyText, messageId: info.messageId,
+            html: trackedHtml, text: bodyText, messageId: info.messageId,
           });
           saveToSent(box, raw).catch(() => {});
         }
 
-        const trackingId = randomUUID();
         await db.insert(draftsTable).values({
           userId: user.id,
           campaignId,
           leadId: item.leadId ?? null,
+          email: item.email,
           subject,
           body: bodyText,
           status: "success",
@@ -138,7 +149,7 @@ export async function processCampaignJobQueue(
         });
 
         await db.update(emailQueueTable)
-          .set({ status: "success", sentAt: new Date() })
+          .set({ status: "success", sentAt: new Date(), trackingId })
           .where(eq(emailQueueTable.id, item.id));
 
         // Update lead status
@@ -765,6 +776,84 @@ router.post("/campaigns/:id/generate-drafts", requireAuth, async (req, res): Pro
   });
 
   res.json({ total: leads.length, succeeded, failed, errors });
+});
+
+// ─── Campaign Analytics ───────────────────────────────────────────────────────
+
+router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  const [campaign] = await db
+    .select()
+    .from(campaignsTable)
+    .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+  if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+  const statusRows = await db
+    .select({ status: leadsTable.status, cnt: sql<number>`count(*)::int` })
+    .from(leadsTable)
+    .where(eq(leadsTable.campaignId, campaignId))
+    .groupBy(leadsTable.status);
+
+  const counts: Record<string, number> = {};
+  for (const r of statusRows) counts[r.status] = r.cnt;
+
+  const total     = campaign.totalLeads ?? 0;
+  const sent      = (counts.sent ?? 0) + (counts.drafted ?? 0);
+  const failed    = counts.failed ?? 0;
+  const remaining = counts.new ?? 0;
+
+  let totalOpens  = 0;
+  let uniqueOpens = 0;
+
+  if (campaign.sendMode === "smtp") {
+    const queueItems = await db
+      .select({ trackingId: emailQueueTable.trackingId })
+      .from(emailQueueTable)
+      .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, "success")));
+
+    const trackingIds = queueItems.filter(i => i.trackingId).map(i => i.trackingId!);
+
+    if (trackingIds.length > 0) {
+      const draftRows = await db
+        .select({ id: draftsTable.id })
+        .from(draftsTable)
+        .where(inArray(draftsTable.trackingId, trackingIds));
+
+      const draftIds = draftRows.map(d => d.id);
+
+      if (draftIds.length > 0) {
+        const [openStats] = await db
+          .select({
+            total:  sql<number>`count(*)::int`,
+            unique: sql<number>`count(distinct ${emailTrackingEventsTable.draftId})::int`,
+          })
+          .from(emailTrackingEventsTable)
+          .where(
+            and(
+              inArray(emailTrackingEventsTable.draftId, draftIds),
+              eq(emailTrackingEventsTable.eventType, "open"),
+            )
+          );
+
+        totalOpens  = openStats?.total  ?? 0;
+        uniqueOpens = openStats?.unique ?? 0;
+      }
+    }
+  }
+
+  const deliveryRate = total > 0 ? Math.round((sent    / total) * 100) : 0;
+  const failedRate   = total > 0 ? Math.round((failed  / total) * 100) : 0;
+  const openRate     = sent  > 0 ? Math.round((uniqueOpens / sent) * 100) : 0;
+
+  res.json({
+    total, sent, failed, remaining,
+    totalOpens, uniqueOpens,
+    deliveryRate, failedRate, openRate,
+    sendMode: campaign.sendMode,
+  });
 });
 
 export default router;

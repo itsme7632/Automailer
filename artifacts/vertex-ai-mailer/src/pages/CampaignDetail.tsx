@@ -6,7 +6,7 @@ import {
   getGetCampaignQueryKey,
   getGetLeadsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
@@ -15,7 +15,7 @@ import {
   ArrowLeft, Send, Clock, CheckCircle2, XCircle, Loader2,
   Gauge, RotateCcw, ChevronDown, ChevronUp, Play, Layers,
   Mail, Server, FileText, AlertTriangle, RefreshCw, Inbox,
-  Users, Timer,
+  Users, Timer, BarChart3, Eye, TrendingUp,
 } from "lucide-react";
 import { SendProgressPanel } from "@/components/SendProgressPanel";
 
@@ -116,6 +116,25 @@ export default function CampaignDetail() {
     { campaignId, page: leadsPage, limit: 10 },
     { query: { enabled: !!campaignId && showLeads } }
   );
+
+  const { data: analytics } = useQuery({
+    queryKey: ["campaign-analytics", campaignId],
+    enabled: !!campaignId,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const token = localStorage.getItem("auth_token");
+      const res   = await fetch(`/api/campaigns/${campaignId}/analytics`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      return res.json() as Promise<{
+        total: number; sent: number; failed: number; remaining: number;
+        totalOpens: number; uniqueOpens: number;
+        deliveryRate: number; failedRate: number; openRate: number;
+        sendMode: string;
+      }>;
+    },
+  });
 
   // ─── Fetch progress ──────────────────────────────────────────────────────────
   const fetchProgress = useCallback(async () => {
@@ -715,6 +734,97 @@ export default function CampaignDetail() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* ─── Campaign Analytics ─────────────────────────────────────────────── */}
+        {analytics && campaign?.sendMode === "smtp" && (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <button
+              className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50/60 transition-colors"
+              onClick={() => {}}
+            >
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <BarChart3 className="h-4 w-4 text-slate-500" />
+                Campaign Analytics
+              </div>
+            </button>
+            <div className="border-t border-slate-100 px-5 py-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    label: "Delivery Rate",
+                    value: `${analytics.deliveryRate}%`,
+                    sub: `${analytics.sent} of ${analytics.total} sent`,
+                    color: "emerald",
+                    icon: <CheckCircle2 className="h-4 w-4 text-emerald-500" />,
+                  },
+                  {
+                    label: "Open Rate",
+                    value: `${analytics.openRate}%`,
+                    sub: `${analytics.uniqueOpens} unique opens`,
+                    color: "blue",
+                    icon: <Eye className="h-4 w-4 text-blue-500" />,
+                  },
+                  {
+                    label: "Total Opens",
+                    value: analytics.totalOpens,
+                    sub: analytics.totalOpens !== analytics.uniqueOpens
+                      ? `${analytics.totalOpens - analytics.uniqueOpens} re-opens`
+                      : "all unique",
+                    color: "violet",
+                    icon: <TrendingUp className="h-4 w-4 text-violet-500" />,
+                  },
+                  {
+                    label: "Failed Rate",
+                    value: `${analytics.failedRate}%`,
+                    sub: `${analytics.failed} failed`,
+                    color: analytics.failed > 0 ? "red" : "slate",
+                    icon: <XCircle className={`h-4 w-4 ${analytics.failed > 0 ? "text-red-500" : "text-slate-400"}`} />,
+                  },
+                ].map(s => (
+                  <div key={s.label} className="bg-slate-50 rounded-xl p-3.5">
+                    <div className="mb-1.5">{s.icon}</div>
+                    <div className="text-xl font-bold text-slate-900">{s.value}</div>
+                    <div className="text-xs font-medium text-slate-600 mt-0.5">{s.label}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+              {analytics.sent > 0 && (
+                <div className="mt-4">
+                  <div className="flex justify-between text-xs text-slate-500 mb-1.5">
+                    <span>Delivery</span>
+                    <span>{analytics.deliveryRate}%</span>
+                  </div>
+                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-emerald-500 rounded-full transition-all duration-700"
+                      style={{ width: `${analytics.deliveryRate}%` }}
+                    />
+                  </div>
+                  {analytics.uniqueOpens > 0 && (
+                    <>
+                      <div className="flex justify-between text-xs text-slate-500 mb-1.5 mt-2">
+                        <span>Opens</span>
+                        <span>{analytics.openRate}%</span>
+                      </div>
+                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 rounded-full transition-all duration-700"
+                          style={{ width: `${analytics.openRate}%` }}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+              <div className="mt-3 flex justify-end">
+                <Link href="/sent-emails" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  View all sent emails →
+                </Link>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

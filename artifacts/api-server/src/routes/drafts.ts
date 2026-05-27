@@ -299,7 +299,7 @@ router.post("/drafts/from-template", requireAuth, async (req, res): Promise<void
     try {
       const gmailDraftId = await createGmailDraft(freshUser, email, subject, bodyText, trackedHtml);
       await db.insert(draftsTable).values({
-        userId: user.id, gmailDraftId, subject, body: bodyText, status: "success", trackingId,
+        userId: user.id, gmailDraftId, email, subject, body: bodyText, status: "success", trackingId,
       });
       results.push({ email, subject, status: "success", gmailDraftId });
       succeeded++;
