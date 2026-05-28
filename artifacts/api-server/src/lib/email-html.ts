@@ -246,6 +246,7 @@ ${headerRow}
 }
 
 // ─── Style: Modern ────────────────────────────────────────────────────────────
+// Two-band header, rounded card, quote highlight box, CTA button footer
 
 function modernTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -256,29 +257,76 @@ function modernTemplate(
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 120, 44);
 
-  const headerRow = (company || logoHtml)
+  const vehicle  = row.vehicle  ? escapeHtml(row.vehicle)               : "";
+  const pickup   = row.pickup   ? escapeHtml(row.pickup)                : "";
+  const delivery = row.delivery ? escapeHtml(row.delivery)              : "";
+  const price    = row.price    ? escapeHtml(formatPrice(row.price))    : "";
+  const quoteId  = row.quote_id ? escapeHtml(row.quote_id)              : "";
+
+  const quotePanel = (vehicle || price)
     ? `<tr>
-        <td class="em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:28px 40px;">
-          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
-          ${company ? `<p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>` : ""}
-          ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.78);font-size:12px;font-weight:400;letter-spacing:0.3px;line-height:1.4;">${tagline}</p>` : ""}
+        <td style="padding:0 40px 28px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#eef2ff;border-left:4px solid ${accent};border-radius:0 6px 6px 0;">
+            <tr>
+              <td style="padding:18px 22px;">
+                <p style="margin:0 0 4px;font-family:${FONT};color:#6366f1;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">Your Quote Summary</p>
+                ${price    ? `<p style="margin:0 0 6px;font-family:${FONT};color:#1e293b;font-size:26px;font-weight:800;line-height:1;">${price}</p>` : ""}
+                ${vehicle  ? `<p style="margin:0 0 4px;font-family:${FONT};color:#374151;font-size:13px;font-weight:600;">${vehicle}</p>` : ""}
+                ${(pickup && delivery) ? `<p style="margin:0;font-family:${FONT};color:#6b7280;font-size:12px;">${pickup} &rarr; ${delivery}</p>` : ""}
+                ${quoteId  ? `<p style="margin:6px 0 0;font-family:${FONT};color:#9ca3af;font-size:11px;">Ref: ${quoteId}</p>` : ""}
+              </td>
+            </tr>
+          </table>
         </td>
       </tr>`
-    : `<tr><td bgcolor="${accent}" style="background-color:${accent};padding:5px 40px;"></td></tr>`;
+    : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
-  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e0e7ff", FONT) : "";
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
-<head>${sharedHead()}</head>
-<body style="margin:0;padding:0;background-color:#f1f5f9;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f1f5f9" style="background-color:#f1f5f9;width:100%;">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-mod-top{padding:0 20px 20px!important;}
+  .em-mod-body{padding:28px 20px 28px!important;}
+  .em-mod-foot{padding:16px 20px!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#eef2ff;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef2ff" style="background-color:#eef2ff;width:100%;">
 <tr><td class="em-wrapper-td" align="center" style="padding:40px 16px;">
 <!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
-<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #e2e8f0;">
-${headerRow}
-<tr><td class="em-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #c7d2fe;">
+<!-- Top accent band -->
+<tr><td bgcolor="#312e81" style="background-color:#312e81;padding:5px 40px;"></td></tr>
+<!-- Main header -->
+<tr>
+  <td class="em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:24px 40px 28px;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:21px;font-weight:700;letter-spacing:0.2px;">${company}</p>` : ""}
+          ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:rgba(199,210,254,0.9);font-size:12px;letter-spacing:0.3px;">${tagline}</p>` : ""}
+        </td>
+        <td align="right" style="vertical-align:bottom;">
+          <p style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.45);font-size:10px;letter-spacing:2px;text-transform:uppercase;">AUTO&nbsp;TRANSPORT</p>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+<!-- Quote panel -->
+${quotePanel}
+<!-- Body -->
+<tr><td class="em-mod-body" style="padding:${quotePanel ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<!-- CTA footer -->
+<tr>
+  <td class="em-mod-foot" style="padding:20px 40px 28px;background-color:#f8fafc;border-top:1px solid #e0e7ff;text-align:center;">
+    <p style="margin:0 0 12px;font-family:${FONT};color:#6b7280;font-size:12px;">Ready to book your transport?</p>
+    <a href="mailto:" style="display:inline-block;padding:11px 32px;background-color:${accent};color:#ffffff;font-family:${FONT};font-size:14px;font-weight:700;text-decoration:none;border-radius:6px;letter-spacing:0.3px;">Reply to Confirm &rarr;</a>
+  </td>
+</tr>
 </table>
 <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
@@ -390,6 +438,7 @@ function luxuryTemplate(
 }
 
 // ─── Style: Corporate ─────────────────────────────────────────────────────────
+// Enterprise look with structured quote details table + two-column footer
 
 function corporateTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -399,6 +448,42 @@ function corporateTemplate(
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 130, 46);
+
+  const vehicle  = row.vehicle  ? escapeHtml(row.vehicle)            : "";
+  const pickup   = row.pickup   ? escapeHtml(row.pickup)             : "";
+  const delivery = row.delivery ? escapeHtml(row.delivery)           : "";
+  const price    = row.price    ? escapeHtml(formatPrice(row.price)) : "";
+  const quoteId  = row.quote_id ? escapeHtml(row.quote_id)           : "";
+
+  const quoteBox = (vehicle || price || pickup || delivery)
+    ? `<tr>
+        <td style="padding:0 40px 28px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="border:1px solid #cbd5e1;border-top:3px solid ${accent};">
+            <tr>
+              <td colspan="2" style="padding:10px 20px 8px;background-color:#f1f5f9;border-bottom:1px solid #e2e8f0;">
+                <p style="margin:0;font-family:${FONT};color:${accent};font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">&#9632; Quote Details</p>
+              </td>
+            </tr>
+            ${vehicle ? `<tr>
+              <td style="padding:10px 20px 4px;font-family:${FONT};color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;width:38%;">Vehicle</td>
+              <td style="padding:10px 20px 4px;font-family:${FONT};color:#1e293b;font-size:13px;font-weight:600;">${vehicle}</td>
+            </tr>` : ""}
+            ${(pickup && delivery) ? `<tr>
+              <td style="padding:4px 20px;font-family:${FONT};color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Route</td>
+              <td style="padding:4px 20px;font-family:${FONT};color:#1e293b;font-size:13px;font-weight:600;">${pickup} &rarr; ${delivery}</td>
+            </tr>` : ""}
+            ${price ? `<tr>
+              <td style="padding:4px 20px;font-family:${FONT};color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Quoted Price</td>
+              <td style="padding:4px 20px;font-family:${FONT};color:#059669;font-size:16px;font-weight:800;">${price}</td>
+            </tr>` : ""}
+            ${quoteId ? `<tr>
+              <td style="padding:4px 20px 12px;font-family:${FONT};color:#64748b;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;">Reference #</td>
+              <td style="padding:4px 20px 12px;font-family:${FONT};color:#7c3aed;font-size:13px;font-weight:600;">${quoteId}</td>
+            </tr>` : ""}
+          </table>
+        </td>
+      </tr>`
+    : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#cbd5e1", FONT) : "";
@@ -433,12 +518,18 @@ function corporateTemplate(
     </table>
   </td>
 </tr>
+${quoteBox}
 <tr>
-  <td class="em-corp-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-corp-body" style="padding:${quoteBox ? "8px" : "36px"} 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td class="em-corp-foot" style="padding:14px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;">
-    <p style="margin:0;font-family:${FONT};color:#94a3b8;font-size:11px;letter-spacing:0.5px;">CONFIDENTIAL AUTO TRANSPORT QUOTE</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td><p style="margin:0;font-family:${FONT};color:#94a3b8;font-size:11px;letter-spacing:0.5px;">CONFIDENTIAL AUTO TRANSPORT QUOTE</p></td>
+        <td align="right"><p style="margin:0;font-family:${FONT};color:#cbd5e1;font-size:11px;">${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p></td>
+      </tr>
+    </table>
   </td>
 </tr>
 </table>
@@ -450,6 +541,7 @@ function corporateTemplate(
 }
 
 // ─── Style: Urgent ────────────────────────────────────────────────────────────
+// Follow-up style with urgency alert panel and availability warning
 
 function urgentTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -457,6 +549,34 @@ function urgentTemplate(
   const FONT    = "Arial, Helvetica, sans-serif";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 120, 40);
+
+  const price    = row.price    ? escapeHtml(formatPrice(row.price)) : "";
+  const vehicle  = row.vehicle  ? escapeHtml(row.vehicle)            : "";
+  const quoteId  = row.quote_id ? escapeHtml(row.quote_id)           : "";
+
+  const urgencyPanel = `<tr>
+    <td style="padding:0 40px 28px;">
+      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#fff7ed;border:1px solid #fed7aa;border-left:4px solid #ea580c;">
+        <tr>
+          <td style="padding:16px 20px;">
+            <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+              <tr>
+                <td style="vertical-align:top;padding-right:12px;">
+                  <p style="margin:0 0 4px;font-family:${FONT};color:#9a3412;font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;">&#9888; Availability Alert</p>
+                  <p style="margin:0;font-family:${FONT};color:#7c2d12;font-size:13px;line-height:1.5;">Limited transport slots remain this week. Please reply within <strong>24 hours</strong> to secure your booking at this rate.</p>
+                </td>
+                ${price ? `<td align="right" style="vertical-align:middle;white-space:nowrap;">
+                  <p style="margin:0 0 2px;font-family:${FONT};color:#9a3412;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">Your Rate</p>
+                  <p style="margin:0;font-family:${FONT};color:#059669;font-size:22px;font-weight:800;">${price}</p>
+                  ${vehicle ? `<p style="margin:2px 0 0;font-family:${FONT};color:#9a3412;font-size:11px;">${vehicle}</p>` : ""}
+                </td>` : ""}
+              </tr>
+            </table>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>`;
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#fecaca", FONT) : "";
@@ -488,12 +608,15 @@ function urgentTemplate(
     </table>
   </td>
 </tr>
+${urgencyPanel}
 <tr>
-  <td class="em-urg-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-urg-body" style="padding:8px 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
 </tr>
 <tr>
-  <td style="padding:12px 40px;background-color:#fff5f5;border-top:1px solid #fecaca;">
-    <p style="margin:0;font-family:${FONT};color:#ef4444;font-size:11px;">This quote is time-sensitive. Please respond promptly.</p>
+  <td style="padding:16px 40px 20px;background-color:#fff5f5;border-top:1px solid #fecaca;text-align:center;">
+    <p style="margin:0 0 10px;font-family:${FONT};color:#ef4444;font-size:11px;">This quote expires soon. Please respond promptly to lock in your rate.</p>
+    <a href="mailto:" style="display:inline-block;padding:10px 28px;background-color:#dc2626;color:#ffffff;font-family:${FONT};font-size:13px;font-weight:700;text-decoration:none;border-radius:4px;letter-spacing:0.3px;">Reply Now to Confirm &rarr;</a>
+    ${quoteId ? `<p style="margin:10px 0 0;font-family:${FONT};color:#f87171;font-size:11px;">Quote Ref: ${quoteId}</p>` : ""}
   </td>
 </tr>
 </table>
@@ -505,15 +628,59 @@ function urgentTemplate(
 }
 
 // ─── Style: Dispatch ──────────────────────────────────────────────────────────
+// Logistics dispatch board feel with route visualization panel
 
 function dispatchTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
+  const MONO    = "Courier New, Courier, monospace";
   const accent  = safeColor(branding.accentColor) || "#065f46";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 120, 44);
+
+  const vehicle  = row.vehicle  ? escapeHtml(row.vehicle)            : "";
+  const pickup   = row.pickup   ? escapeHtml(row.pickup)             : "";
+  const delivery = row.delivery ? escapeHtml(row.delivery)           : "";
+  const price    = row.price    ? escapeHtml(formatPrice(row.price)) : "";
+  const quoteId  = row.quote_id ? escapeHtml(row.quote_id)           : "";
+
+  const routePanel = (pickup || delivery || vehicle)
+    ? `<tr>
+        <td style="padding:0 40px 28px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#f0fdf4;border:1px solid #bbf7d0;">
+            <tr>
+              <td colspan="3" style="padding:10px 20px 8px;border-bottom:1px solid #bbf7d0;">
+                <p style="margin:0;font-family:${FONT};color:#065f46;font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">&#9654; Transport Route</p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 20px;vertical-align:top;width:40%;">
+                <p style="margin:0 0 3px;font-family:${FONT};color:#6b7280;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">ORIGIN</p>
+                <p style="margin:0;font-family:${FONT};color:#065f46;font-size:14px;font-weight:700;">${pickup || "—"}</p>
+              </td>
+              <td align="center" style="padding:16px 8px;vertical-align:middle;color:#059669;font-size:18px;">&#8594;</td>
+              <td style="padding:16px 20px;vertical-align:top;width:40%;">
+                <p style="margin:0 0 3px;font-family:${FONT};color:#6b7280;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;">DESTINATION</p>
+                <p style="margin:0;font-family:${FONT};color:#065f46;font-size:14px;font-weight:700;">${delivery || "—"}</p>
+              </td>
+            </tr>
+            ${(vehicle || price || quoteId) ? `<tr>
+              <td colspan="3" style="padding:8px 20px 14px;border-top:1px solid #bbf7d0;">
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                  <tr>
+                    ${vehicle ? `<td><p style="margin:0;font-family:${MONO};color:#047857;font-size:12px;">&#9632; ${vehicle}</p></td>` : ""}
+                    ${price   ? `<td align="right"><p style="margin:0;font-family:${FONT};color:#059669;font-size:16px;font-weight:800;">${price}</p></td>` : ""}
+                  </tr>
+                  ${quoteId ? `<tr><td colspan="2"><p style="margin:4px 0 0;font-family:${MONO};color:#6b7280;font-size:11px;">Order: ${quoteId}</p></td></tr>` : ""}
+                </table>
+              </td>
+            </tr>` : ""}
+          </table>
+        </td>
+      </tr>`
+    : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#a7f3d0", FONT) : "";
@@ -531,7 +698,7 @@ function dispatchTemplate(
 <!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
 <table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #d1fae5;">
 <tr>
-  <td class="em-disp-hdr" bgcolor="${accent}" style="background-color:${accent};padding:24px 40px;">
+  <td class="em-disp-hdr em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:24px 40px;">
     <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
       <tr>
         <td>
@@ -547,12 +714,17 @@ function dispatchTemplate(
     </table>
   </td>
 </tr>
+${routePanel}
 <tr>
-  <td class="em-disp-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-disp-body" style="padding:${routePanel ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="padding:12px 40px;background-color:#f0fdf4;border-top:1px solid #d1fae5;">
-    <p style="margin:0;font-family:${FONT};color:#059669;font-size:11px;letter-spacing:0.3px;">&#10003; Dispatch-ready quote from a licensed auto transport broker</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td><p style="margin:0;font-family:${FONT};color:#059669;font-size:11px;letter-spacing:0.3px;">&#10003; Dispatch-ready &nbsp;&#10003; Fully Insured &nbsp;&#10003; Licensed Broker</p></td>
+      </tr>
+    </table>
   </td>
 </tr>
 </table>
@@ -564,6 +736,7 @@ function dispatchTemplate(
 }
 
 // ─── Style: Friendly ──────────────────────────────────────────────────────────
+// Warm, approachable — personalized greeting box + trust badges footer
 
 function friendlyTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -573,6 +746,31 @@ function friendlyTemplate(
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 120, 44);
+
+  const name     = row.name    ? escapeHtml(row.name.split(" ")[0])  : "";
+  const vehicle  = row.vehicle ? escapeHtml(row.vehicle)             : "";
+  const price    = row.price   ? escapeHtml(formatPrice(row.price))  : "";
+
+  const greetingBox = (name || vehicle)
+    ? `<tr>
+        <td style="padding:0 40px 28px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#f0f9ff;border-radius:8px;border:1px solid #bae6fd;">
+            <tr>
+              <td style="padding:20px 24px;">
+                ${name ? `<p style="margin:0 0 6px;font-family:${FONT};color:#0369a1;font-size:16px;font-weight:700;">Great news${name ? `, ${name}` : ""}!</p>` : ""}
+                <p style="margin:0${vehicle ? " 0 8px" : ""};font-family:${FONT};color:#0c4a6e;font-size:13px;line-height:1.6;">Your transport quote is ready to review. We've put together our best available rate for you.</p>
+                ${(vehicle || price) ? `<table role="presentation" cellspacing="0" cellpadding="0" border="0">
+                  <tr>
+                    ${vehicle ? `<td style="padding-right:20px;"><p style="margin:0;font-family:${FONT};color:#075985;font-size:12px;">&#9656; ${vehicle}</p></td>` : ""}
+                    ${price   ? `<td><p style="margin:0;font-family:${FONT};color:#059669;font-size:18px;font-weight:800;">${price}</p></td>` : ""}
+                  </tr>
+                </table>` : ""}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`
+    : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#bae6fd", FONT) : "";
@@ -588,20 +786,37 @@ function friendlyTemplate(
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f0f9ff" style="background-color:#f0f9ff;width:100%;">
 <tr><td align="center" style="padding:40px 16px;">
 <!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
-<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #bae6fd;border-radius:0;">
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #bae6fd;border-top:0;">
 <tr>
-  <td class="em-fr-hdr" bgcolor="${accent}" style="background-color:${accent};padding:26px 40px;">
-    ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
-    ${company ? `<p style="margin:0;font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;">${company}</p>` : ""}
-    ${tagline ? `<p style="margin:4px 0 0;font-family:${FONT};color:rgba(255,255,255,0.75);font-size:13px;">${tagline}</p>` : ""}
+  <td class="em-fr-hdr em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:22px 40px 26px;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p style="margin:0;font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;">${company}</p>` : ""}
+          ${tagline ? `<p style="margin:4px 0 0;font-family:${FONT};color:rgba(255,255,255,0.75);font-size:13px;">${tagline}</p>` : ""}
+        </td>
+        <td align="right" style="vertical-align:bottom;">
+          <p style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.5);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;">Transport Quote</p>
+        </td>
+      </tr>
+    </table>
   </td>
 </tr>
+${greetingBox}
 <tr>
-  <td class="em-fr-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-fr-body" style="padding:${greetingBox ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
 </tr>
 <tr>
-  <td style="padding:14px 40px;background-color:#f0f9ff;border-top:1px solid #bae6fd;">
-    <p style="margin:0;font-family:${FONT};color:#0ea5e9;font-size:12px;">Questions? We're always here to help. Just reply to this email.</p>
+  <td style="padding:16px 40px;background-color:#f0f9ff;border-top:1px solid #bae6fd;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td><p style="margin:0;font-family:${FONT};color:#0ea5e9;font-size:12px;">Questions? We're always here to help. Just reply to this email.</p></td>
+        <td align="right">
+          <p style="margin:0;font-family:${FONT};color:#7dd3fc;font-size:11px;">&#128274; Insured &nbsp;&#128338; Fast Response</p>
+        </td>
+      </tr>
+    </table>
   </td>
 </tr>
 </table>
@@ -613,6 +828,7 @@ function friendlyTemplate(
 }
 
 // ─── Style: Mobile ────────────────────────────────────────────────────────────
+// Ultra-readable: large text, prominent price display, touch-friendly CTA
 
 function mobileTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -621,6 +837,27 @@ function mobileTemplate(
   const accent  = safeColor(branding.accentColor) || "#1e40af";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 100, 36);
+
+  const vehicle  = row.vehicle  ? escapeHtml(row.vehicle)            : "";
+  const pickup   = row.pickup   ? escapeHtml(row.pickup)             : "";
+  const delivery = row.delivery ? escapeHtml(row.delivery)           : "";
+  const price    = row.price    ? escapeHtml(formatPrice(row.price)) : "";
+
+  const priceDisplay = (price || vehicle)
+    ? `<tr>
+        <td style="padding:0 0 28px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;">
+            <tr>
+              <td style="padding:20px 24px;">
+                ${price    ? `<p style="margin:0 0 4px;font-family:${FONT};color:#059669;font-size:32px;font-weight:900;line-height:1;">${price}</p>` : ""}
+                ${vehicle  ? `<p style="margin:0 0 6px;font-family:${FONT};color:#1e40af;font-size:16px;font-weight:700;">${vehicle}</p>` : ""}
+                ${(pickup && delivery) ? `<p style="margin:0;font-family:${FONT};color:#6b7280;font-size:14px;">${pickup} &rarr; ${delivery}</p>` : ""}
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`
+    : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b", "17px");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
@@ -631,20 +868,27 @@ function mobileTemplate(
 @media only screen and (max-width:600px){
   .em-mob-card{width:100%!important;max-width:100%!important;}
   .em-mob-body{padding:28px 20px!important;}
+  .em-p{font-size:16px!important;line-height:1.8!important;}
 }`)}</head>
 <body style="margin:0;padding:0;background-color:#ffffff;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff;width:100%;">
 <tr><td align="center" style="padding:32px 16px;">
 <!--[if (gte mso 9)|(IE)]><table width="560" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
-<table class="em-mob-card em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:560px;max-width:560px;border-top:3px solid ${accent};">
+<table class="em-mob-card em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:560px;max-width:560px;border-top:4px solid ${accent};">
 <tr>
-  <td style="padding:28px 0 16px;">
+  <td style="padding:28px 0 20px;">
     ${logoHtml ? `<div style="margin-bottom:12px;">${logoHtml}</div>` : ""}
     ${company ? `<p style="margin:0;font-family:${FONT};color:${accent};font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">${company}</p>` : ""}
   </td>
 </tr>
+${priceDisplay}
 <tr>
-  <td class="em-mob-body" style="padding:8px 0 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-mob-body" style="padding:0 0 32px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+<tr>
+  <td style="padding:0 0 32px;text-align:center;">
+    <a href="mailto:" style="display:inline-block;padding:16px 40px;background-color:${accent};color:#ffffff;font-family:${FONT};font-size:16px;font-weight:700;text-decoration:none;border-radius:8px;">Reply to Confirm &rarr;</a>
+  </td>
 </tr>
 </table>
 <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
@@ -655,6 +899,7 @@ function mobileTemplate(
 }
 
 // ─── Style: Dark ──────────────────────────────────────────────────────────────
+// Email-safe dark design — dark card, light text, modern SaaS feel
 
 function darkTemplate(
   body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
@@ -664,6 +909,38 @@ function darkTemplate(
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
   const logoHtml = buildLogoHtml(branding, 120, 44);
+
+  const vehicle  = row.vehicle  ? escapeHtml(row.vehicle)            : "";
+  const pickup   = row.pickup   ? escapeHtml(row.pickup)             : "";
+  const delivery = row.delivery ? escapeHtml(row.delivery)           : "";
+  const price    = row.price    ? escapeHtml(formatPrice(row.price)) : "";
+  const quoteId  = row.quote_id ? escapeHtml(row.quote_id)           : "";
+
+  const quoteRef = (vehicle || price)
+    ? `<tr>
+        <td style="padding:0 40px 28px;">
+          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color:#0f172a;border:1px solid #334155;border-left:3px solid ${accent};">
+            <tr>
+              <td style="padding:16px 20px;">
+                <p style="margin:0 0 8px;font-family:${FONT};color:${accent};font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">Quote Details</p>
+                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                  <tr>
+                    <td style="padding-right:20px;">
+                      ${vehicle ? `<p style="margin:0 0 4px;font-family:${FONT};color:#e2e8f0;font-size:14px;font-weight:600;">${vehicle}</p>` : ""}
+                      ${(pickup && delivery) ? `<p style="margin:0;font-family:${FONT};color:#64748b;font-size:12px;">${pickup} &rarr; ${delivery}</p>` : ""}
+                      ${quoteId ? `<p style="margin:6px 0 0;font-family:${FONT};color:#475569;font-size:11px;">Ref: ${quoteId}</p>` : ""}
+                    </td>
+                    ${price ? `<td align="right" style="vertical-align:middle;white-space:nowrap;">
+                      <p style="margin:0;font-family:${FONT};color:#34d399;font-size:24px;font-weight:800;">${price}</p>
+                    </td>` : ""}
+                  </tr>
+                </table>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>`
+    : "";
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#cbd5e1");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#334155", FONT, "#c8d3e0") : "";
@@ -683,17 +960,32 @@ function darkTemplate(
 <table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#1e293b;border:1px solid #334155;border-top:3px solid ${accent};">
 <tr>
   <td class="em-dark-hdr" style="background-color:#1e293b;padding:28px 40px;border-bottom:1px solid #334155;">
-    ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
-    ${company ? `<p class="em-co" style="margin:0;font-family:${FONT};color:#f1f5f9;font-size:20px;font-weight:700;">${company}</p>` : ""}
-    ${tagline ? `<p style="margin:4px 0 0;font-family:${FONT};color:#64748b;font-size:12px;">${tagline}</p>` : ""}
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p class="em-co" style="margin:0;font-family:${FONT};color:#f1f5f9;font-size:20px;font-weight:700;">${company}</p>` : ""}
+          ${tagline ? `<p style="margin:4px 0 0;font-family:${FONT};color:#64748b;font-size:12px;">${tagline}</p>` : ""}
+        </td>
+        <td align="right" style="vertical-align:middle;">
+          <p style="margin:0;font-family:${FONT};color:${accent};font-size:10px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">AUTO TRANSPORT</p>
+        </td>
+      </tr>
+    </table>
   </td>
 </tr>
+${quoteRef}
 <tr>
-  <td class="em-dark-body" style="background-color:#1e293b;padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-dark-body" style="background-color:#1e293b;padding:${quoteRef ? "4px" : "36px"} 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="background-color:#0f172a;padding:14px 40px;border-top:1px solid #1e293b;">
-    <p style="margin:0;font-family:${FONT};color:#475569;font-size:11px;">Auto Transport Quote &mdash; Sent via BrokerMail</p>
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td><p style="margin:0;font-family:${FONT};color:#475569;font-size:11px;">Auto Transport Quote &mdash; Sent via BrokerMail</p></td>
+        <td align="right"><p style="margin:0;font-family:${FONT};color:#334155;font-size:11px;">${new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</p></td>
+      </tr>
+    </table>
   </td>
 </tr>
 </table>
