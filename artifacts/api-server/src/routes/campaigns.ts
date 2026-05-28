@@ -4,7 +4,7 @@ import {
   activityTable, usersTable, emailQueueTable, campaignBatchesTable,
   mailboxesTable,
 } from "@workspace/db";
-import { eq, and, count, sql, desc, gte, inArray } from "drizzle-orm";
+import { eq, and, count, sql, desc, gte, inArray, or, isNull, lte, isNotNull } from "drizzle-orm";
 import { emailTrackingEventsTable } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import {
@@ -28,6 +28,26 @@ const router: IRouter = Router();
 const activeJobs = new Map<string, boolean>();
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
+function isProviderRateLimitError(msg: string): boolean {
+  const s = msg.toLowerCase();
+  return (
+    s.includes("max emails per hour") ||
+    s.includes("sending limit") ||
+    s.includes("rate limit") ||
+    s.includes("too many") ||
+    s.includes("slow down") ||
+    s.includes("quota exceeded") ||
+    /\b421\b/.test(s) ||
+    /\b452\b/.test(s)
+  );
+}
+
+function retryBackoffMs(deferredCount: number): number {
+  if (deferredCount <= 1) return 15 * 60_000;
+  if (deferredCount === 2) return 30 * 60_000;
+  return 60 * 60_000;
+}
 
 function userBranding(user: User): BrandingSettings {
   return {
@@ -63,21 +83,20 @@ export async function processCampaignJobQueue(
 
   try {
     while (activeJobs.get(jobId)) {
-      // ── Hourly-limit check ─────────────────────────────────────────────
+      // ── True rolling-60-min quota check (counts ALL SMTP attempts) ─────
       const hourAgo = new Date(Date.now() - 3_600_000);
       const [hourlyRow] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(emailQueueTable)
         .where(and(
-          eq(emailQueueTable.userId, user.id),
-          eq(emailQueueTable.status, "success"),
-          gte(emailQueueTable.sentAt, hourAgo),
+          eq(emailQueueTable.mailboxId, box.id),
+          isNotNull(emailQueueTable.firstAttemptAt),
+          gte(emailQueueTable.firstAttemptAt, hourAgo),
         ));
       const sentThisHour = hourlyRow?.count ?? 0;
       const maxPerHour   = box.maxPerHour ?? 100;
 
       if (sentThisHour >= maxPerHour) {
-        // Set cooldown on campaign
         const cooldownUntil = new Date(Date.now() + 3_600_000);
         await db.update(campaignsTable).set({ cooldownUntil, updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
@@ -85,13 +104,20 @@ export async function processCampaignJobQueue(
         continue;
       }
 
-      // ── Grab next pending item ─────────────────────────────────────────
+      // ── Grab next pending OR ready-deferred item ───────────────────────
+      const nowTs = new Date();
       const [item] = await db
         .select()
         .from(emailQueueTable)
         .where(and(
           eq(emailQueueTable.jobId, jobId),
-          eq(emailQueueTable.status, "pending"),
+          or(
+            eq(emailQueueTable.status, "pending"),
+            and(
+              eq(emailQueueTable.status, "deferred"),
+              or(isNull(emailQueueTable.retryAfter), lte(emailQueueTable.retryAfter, nowTs))
+            )
+          )
         ))
         .orderBy(emailQueueTable.id)
         .limit(1);
@@ -99,7 +125,7 @@ export async function processCampaignJobQueue(
       if (!item) break;
 
       await db.update(emailQueueTable)
-        .set({ status: "sending" })
+        .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs })
         .where(eq(emailQueueTable.id, item.id));
 
       const delay = (box.delaySeconds ?? 15) * 1000;
@@ -178,7 +204,15 @@ export async function processCampaignJobQueue(
           subject, body: bodyText, status: "failed", errorMessage: errMsg,
         });
 
-        if (attempts >= 3) {
+        const newDeferred = (item.deferredCount ?? 0) + 1;
+
+        if (isProviderRateLimitError(errMsg)) {
+          const retryAfter = new Date(Date.now() + 60 * 60_000);
+          await db.update(emailQueueTable)
+            .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
+            .where(eq(emailQueueTable.id, item.id));
+          break; // Provider rate-limited — stop batch
+        } else if (attempts >= 3) {
           await db.update(emailQueueTable)
             .set({ status: "failed", attempts, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
@@ -196,8 +230,9 @@ export async function processCampaignJobQueue(
 
           batchFailed++;
         } else {
+          const retryAfter = new Date(Date.now() + retryBackoffMs(newDeferred));
           await db.update(emailQueueTable)
-            .set({ status: "pending", attempts, lastError: errMsg })
+            .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
         }
       }
@@ -249,14 +284,14 @@ export async function processCampaignFully(
         .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
       if (!camp || camp.status === "paused" || camp.status === "cancelled") break;
 
-      // Hourly-limit check
+      // True rolling-60-min quota check (counts ALL SMTP attempts)
       const hourAgo = new Date(Date.now() - 3_600_000);
       const [hourlyRow] = await db.select({ count: sql<number>`count(*)::int` })
         .from(emailQueueTable)
         .where(and(
-          eq(emailQueueTable.userId, user.id),
-          eq(emailQueueTable.status, "success"),
-          gte(emailQueueTable.sentAt, hourAgo),
+          eq(emailQueueTable.mailboxId, box.id),
+          isNotNull(emailQueueTable.firstAttemptAt),
+          gte(emailQueueTable.firstAttemptAt, hourAgo),
         ));
       const sentThisHour = hourlyRow?.count ?? 0;
       const maxPerHour   = box.maxPerHour ?? 100;
@@ -267,8 +302,8 @@ export async function processCampaignFully(
           status: "cooling_down", cooldownUntil, updatedAt: new Date(),
         }).where(eq(campaignsTable.id, campaignId));
         await sleep(60_000);
-        const now = new Date();
-        if (now >= cooldownUntil) {
+        const nowCheck = new Date();
+        if (nowCheck >= cooldownUntil) {
           await db.update(campaignsTable).set({
             status: "sending", cooldownUntil: null, updatedAt: new Date(),
           }).where(eq(campaignsTable.id, campaignId));
@@ -285,19 +320,28 @@ export async function processCampaignFully(
         }).where(eq(campaignsTable.id, campaignId));
       }
 
-      // Grab next pending item for this campaign
+      // Grab next pending OR ready-deferred item for this campaign
+      const nowTs2 = new Date();
       const [item] = await db.select()
         .from(emailQueueTable)
         .where(and(
           eq(emailQueueTable.campaignId, campaignId),
-          eq(emailQueueTable.status, "pending"),
+          or(
+            eq(emailQueueTable.status, "pending"),
+            and(
+              eq(emailQueueTable.status, "deferred"),
+              or(isNull(emailQueueTable.retryAfter), lte(emailQueueTable.retryAfter, nowTs2))
+            )
+          )
         ))
         .orderBy(emailQueueTable.id)
         .limit(1);
 
-      if (!item) break; // Nothing left — done!
+      if (!item) break;
 
-      await db.update(emailQueueTable).set({ status: "sending" }).where(eq(emailQueueTable.id, item.id));
+      await db.update(emailQueueTable)
+        .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs2 })
+        .where(eq(emailQueueTable.id, item.id));
 
       const delay = (box.delaySeconds ?? 15) * 1000;
       await sleep(delay);
@@ -365,15 +409,28 @@ export async function processCampaignFully(
         }).where(eq(campaignsTable.id, campaignId));
 
       } catch (err: any) {
-        const errMsg   = String(err?.message ?? "Send failed");
-        const attempts = item.attempts + 1;
+        const errMsg     = String(err?.message ?? "Send failed");
+        const attempts   = item.attempts + 1;
+        const newDeferred = (item.deferredCount ?? 0) + 1;
 
         await db.insert(draftsTable).values({
           userId: user.id, campaignId, leadId: item.leadId ?? null,
           subject, body: bodyText, status: "failed", errorMessage: errMsg,
         });
 
-        if (attempts >= 3) {
+        if (isProviderRateLimitError(errMsg)) {
+          // Provider rate-limiting — defer for 1 hour and pause campaign immediately
+          const retryAfter = new Date(Date.now() + 60 * 60_000);
+          await db.update(emailQueueTable)
+            .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
+            .where(eq(emailQueueTable.id, item.id));
+          await db.update(campaignsTable).set({
+            status: "cooling_down",
+            cooldownUntil: retryAfter,
+            updatedAt: new Date(),
+          }).where(eq(campaignsTable.id, campaignId));
+          break; // Stop all sends — provider quota exceeded
+        } else if (attempts >= 3) {
           await db.update(emailQueueTable)
             .set({ status: "failed", attempts, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
@@ -387,8 +444,9 @@ export async function processCampaignFully(
             updatedAt: new Date(),
           }).where(eq(campaignsTable.id, campaignId));
         } else {
+          const retryAfter = new Date(Date.now() + retryBackoffMs(newDeferred));
           await db.update(emailQueueTable)
-            .set({ status: "pending", attempts, lastError: errMsg })
+            .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
         }
       }

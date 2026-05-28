@@ -18,9 +18,12 @@ export const emailQueueTable = pgTable("email_queue", {
   useSignatureBuilder: boolean("use_signature_builder").notNull().default(false),
   status: text("status").notNull().default("pending"),
   attempts: integer("attempts").notNull().default(0),
+  deferredCount: integer("deferred_count").notNull().default(0),
   lastError: text("last_error"),
   quoteId: text("quote_id"),
   trackingId: text("tracking_id"),
+  firstAttemptAt: timestamp("first_attempt_at"),
+  retryAfter: timestamp("retry_after"),
   sentAt: timestamp("sent_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });

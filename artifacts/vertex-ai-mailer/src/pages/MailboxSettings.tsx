@@ -1,12 +1,125 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   Loader2, CheckCircle2, XCircle, Server, Mail, User, Lock,
   Wifi, Trash2, Save, FlaskConical, ChevronDown, ChevronUp, FolderSync,
-  Shield, Clock, Gauge, AlertTriangle, Zap,
+  Shield, Clock, Gauge, AlertTriangle, Zap, BarChart2, RefreshCw, TimerReset,
 } from "lucide-react";
+
+interface QuotaStats {
+  hourlyLimit: number;
+  usedThisHour: number;
+  remainingQuota: number;
+  deferredCount: number;
+  retryQueueCount: number;
+  nextReleaseAt: string | null;
+}
+
+function QuotaWidget({ visible }: { visible: boolean }) {
+  const [quota, setQuota]       = useState<QuotaStats | null>(null);
+  const [loading, setLoading]   = useState(false);
+
+  const fetch_ = useCallback(async () => {
+    if (!visible) return;
+    setLoading(true);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res = await fetch("/api/mailbox/quota", { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setQuota(await res.json());
+    } catch { /* ignore */ } finally {
+      setLoading(false);
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    fetch_();
+    const id = setInterval(fetch_, 30_000);
+    return () => clearInterval(id);
+  }, [fetch_]);
+
+  if (!visible) return null;
+
+  const pct = quota ? Math.round((quota.usedThisHour / Math.max(quota.hourlyLimit, 1)) * 100) : 0;
+  const barColor = pct >= 90 ? "bg-red-500" : pct >= 70 ? "bg-amber-400" : "bg-emerald-500";
+
+  function formatRelease(iso: string | null): string {
+    if (!iso) return "—";
+    const diff = new Date(iso).getTime() - Date.now();
+    if (diff <= 0) return "now";
+    const mins = Math.ceil(diff / 60_000);
+    return mins >= 60 ? `${Math.ceil(mins / 60)}h` : `${mins}m`;
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2">
+        <BarChart2 className="h-4 w-4 text-blue-500" />
+        <h3 className="font-semibold text-slate-800 text-sm">SMTP Usage — Rolling Hour</h3>
+        <button type="button" onClick={fetch_} className="ml-auto text-slate-400 hover:text-slate-600 transition-colors">
+          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+        </button>
+      </div>
+      <div className="p-6 space-y-4">
+        {!quota ? (
+          <p className="text-xs text-slate-400 text-center py-2">Loading…</p>
+        ) : (
+          <>
+            {/* Progress bar */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-slate-700">
+                  {quota.usedThisHour} / {quota.hourlyLimit} sent this hour
+                </span>
+                <span className={`font-semibold ${pct >= 90 ? "text-red-600" : pct >= 70 ? "text-amber-600" : "text-emerald-600"}`}>
+                  {pct}%
+                </span>
+              </div>
+              <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${Math.min(pct, 100)}%` }} />
+              </div>
+              <p className="text-xs text-slate-400">{quota.remainingQuota} slots remaining</p>
+            </div>
+
+            {/* Stat grid */}
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { icon: Gauge,      label: "Hourly limit",  value: String(quota.hourlyLimit) },
+                { icon: Clock,      label: "Used this hour", value: String(quota.usedThisHour) },
+                { icon: TimerReset, label: "Deferred",       value: String(quota.deferredCount),
+                  highlight: quota.deferredCount > 0 },
+                { icon: RefreshCw,  label: "Retry queue",    value: String(quota.retryQueueCount),
+                  highlight: quota.retryQueueCount > 0 },
+              ].map(({ icon: Icon, label, value, highlight }) => (
+                <div key={label} className={`flex items-center gap-2 p-3 rounded-xl border ${
+                  highlight ? "bg-amber-50 border-amber-200" : "bg-slate-50 border-slate-100"
+                }`}>
+                  <Icon className={`h-3.5 w-3.5 flex-shrink-0 ${highlight ? "text-amber-500" : "text-slate-400"}`} />
+                  <div>
+                    <p className={`text-sm font-bold leading-none ${highlight ? "text-amber-800" : "text-slate-800"}`}>{value}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{label}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Next release */}
+            {quota.nextReleaseAt && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-100">
+                <Clock className="h-3.5 w-3.5 text-blue-400 flex-shrink-0" />
+                <p className="text-xs text-blue-700">
+                  Next quota slot opens in <span className="font-semibold">{formatRelease(quota.nextReleaseAt)}</span>
+                  {" "}— {new Date(quota.nextReleaseAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </p>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 type Secure = "ssl" | "tls" | "none";
 
@@ -619,6 +732,9 @@ export default function MailboxSettings() {
           )}
         </div>
       </form>
+
+      {/* Quota dashboard — only shown when a mailbox is connected */}
+      <QuotaWidget visible={isConnected} />
     </div>
   );
 }

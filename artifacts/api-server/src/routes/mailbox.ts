@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db, mailboxesTable, templatesTable, draftsTable, usersTable, emailQueueTable } from "@workspace/db";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, sql, or, isNull, lte, isNotNull } from "drizzle-orm";
 import { requireAuth } from "../lib/auth";
 import { encrypt, decrypt } from "../lib/crypto";
 import { testSmtp, sendEmail } from "../lib/smtp";
@@ -17,7 +17,6 @@ import { randomUUID } from "crypto";
 const router: IRouter = Router();
 
 // ─── In-memory job tracker ────────────────────────────────────────────────────
-// Maps jobId -> true while the background loop is running
 const activeJobs = new Map<string, boolean>();
 
 function userBranding(user: User): BrandingSettings {
@@ -36,6 +35,28 @@ function sleep(ms: number) {
   return new Promise(r => setTimeout(r, ms));
 }
 
+/** Returns true if the SMTP server is telling us we've hit its hourly limit. */
+function isProviderRateLimitError(msg: string): boolean {
+  const s = msg.toLowerCase();
+  return (
+    s.includes("max emails per hour") ||
+    s.includes("sending limit") ||
+    s.includes("rate limit") ||
+    s.includes("too many") ||
+    s.includes("slow down") ||
+    s.includes("quota exceeded") ||
+    /\b421\b/.test(s) ||
+    /\b452\b/.test(s)
+  );
+}
+
+/** Backoff delay in ms based on how many times this item has been deferred. */
+function retryBackoffMs(deferredCount: number): number {
+  if (deferredCount <= 1) return 15 * 60_000;  // 15 min
+  if (deferredCount === 2) return 30 * 60_000; // 30 min
+  return 60 * 60_000;                           // 60 min
+}
+
 // ─── Background queue processor ──────────────────────────────────────────────
 async function processJobQueue(jobId: string, box: Mailbox, template: Template, user: User) {
   if (activeJobs.get(jobId)) return;
@@ -48,44 +69,57 @@ async function processJobQueue(jobId: string, box: Mailbox, template: Template, 
 
   try {
     while (activeJobs.get(jobId)) {
-      // ── Hourly-limit check ──────────────────────────────────────────────
+      // ── True rolling-60-min quota check ─────────────────────────────────
+      // Count ALL SMTP attempts (not just successes) — mirrors what the provider counts.
       const hourAgo = new Date(Date.now() - 3_600_000);
       const [hourlyRow] = await db
         .select({ count: sql<number>`count(*)::int` })
         .from(emailQueueTable)
         .where(and(
-          eq(emailQueueTable.userId, user.id),
-          eq(emailQueueTable.status, "success"),
-          gte(emailQueueTable.sentAt, hourAgo),
+          eq(emailQueueTable.mailboxId, box.id),
+          isNotNull(emailQueueTable.firstAttemptAt),
+          gte(emailQueueTable.firstAttemptAt, hourAgo),
         ));
       const sentThisHour = hourlyRow?.count ?? 0;
       const maxPerHour   = box.maxPerHour ?? 100;
 
       if (sentThisHour >= maxPerHour) {
-        await sleep(60_000); // wait 1 min then re-check
+        await sleep(60_000);
         continue;
       }
 
-      // ── Grab next pending item ──────────────────────────────────────────
+      // ── Grab next pending OR ready-deferred item ─────────────────────────
+      const now = new Date();
       const [item] = await db
         .select()
         .from(emailQueueTable)
         .where(and(
           eq(emailQueueTable.jobId, jobId),
-          eq(emailQueueTable.status, "pending"),
+          or(
+            eq(emailQueueTable.status, "pending"),
+            and(
+              eq(emailQueueTable.status, "deferred"),
+              or(
+                isNull(emailQueueTable.retryAfter),
+                lte(emailQueueTable.retryAfter, now),
+              )
+            )
+          )
         ))
         .orderBy(emailQueueTable.id)
         .limit(1);
 
-      if (!item) break; // all done
+      if (!item) break;
 
-      // Mark as sending
+      // Mark as sending; record firstAttemptAt on the very first attempt
       await db
         .update(emailQueueTable)
-        .set({ status: "sending" })
+        .set({
+          status: "sending",
+          firstAttemptAt: item.firstAttemptAt ?? now,
+        })
         .where(eq(emailQueueTable.id, item.id));
 
-      // Delay between emails
       const delay = (box.delaySeconds ?? 15) * 1000;
       await sleep(delay);
 
@@ -123,12 +157,13 @@ async function processJobQueue(jobId: string, box: Mailbox, template: Template, 
 
         await db
           .update(emailQueueTable)
-          .set({ status: "success", sentAt: new Date() })
+          .set({ status: "success", sentAt: new Date(), retryAfter: null })
           .where(eq(emailQueueTable.id, item.id));
 
       } catch (err: any) {
-        const errMsg   = String(err?.message ?? "Send failed");
-        const attempts = item.attempts + 1;
+        const errMsg        = String(err?.message ?? "Send failed");
+        const attempts      = item.attempts + 1;
+        const newDeferred   = (item.deferredCount ?? 0) + 1;
 
         await db.insert(draftsTable).values({
           userId: user.id,
@@ -138,17 +173,25 @@ async function processJobQueue(jobId: string, box: Mailbox, template: Template, 
           errorMessage: errMsg,
         });
 
-        if (attempts >= 3) {
-          // Permanently failed
+        if (isProviderRateLimitError(errMsg)) {
+          // Provider hit its own hourly cap — defer for a full hour and stop sending
+          const retryAfter = new Date(Date.now() + 60 * 60_000);
+          await db
+            .update(emailQueueTable)
+            .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
+            .where(eq(emailQueueTable.id, item.id));
+          break; // Stop loop — provider quota exceeded; retry queue will pick up later
+        } else if (attempts >= 3) {
           await db
             .update(emailQueueTable)
             .set({ status: "failed", attempts, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
         } else {
-          // Auto-retry — put back to pending
+          // Exponential backoff retry: 15m → 30m → 60m
+          const retryAfter = new Date(Date.now() + retryBackoffMs(newDeferred));
           await db
             .update(emailQueueTable)
-            .set({ status: "pending", attempts, lastError: errMsg })
+            .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
         }
       }
@@ -196,6 +239,67 @@ router.get("/mailbox", requireAuth, async (req, res): Promise<void> => {
     batchSize:     box.batchSize     ?? 10,
     delaySeconds:  box.delaySeconds  ?? 15,
     maxPerHour:    box.maxPerHour    ?? 100,
+  });
+});
+
+// ─── GET /api/mailbox/quota ───────────────────────────────────────────────────
+router.get("/mailbox/quota", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const [box] = await db
+    .select()
+    .from(mailboxesTable)
+    .where(eq(mailboxesTable.userId, user.id));
+
+  if (!box) {
+    res.json({ hourlyLimit: 0, usedThisHour: 0, deferredCount: 0, retryQueueCount: 0, nextReleaseAt: null });
+    return;
+  }
+
+  const hourAgo = new Date(Date.now() - 3_600_000);
+
+  // All SMTP attempts made in the rolling 60-min window
+  const [usedRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(emailQueueTable)
+    .where(and(
+      eq(emailQueueTable.mailboxId, box.id),
+      isNotNull(emailQueueTable.firstAttemptAt),
+      gte(emailQueueTable.firstAttemptAt, hourAgo),
+    ));
+
+  // Items currently deferred (waiting for backoff or provider cooldown)
+  const [deferredRow] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(emailQueueTable)
+    .where(and(
+      eq(emailQueueTable.userId, user.id),
+      eq(emailQueueTable.status, "deferred"),
+    ));
+
+  // Oldest firstAttemptAt in window → tells us when the next slot opens up
+  const [oldestRow] = await db
+    .select({ t: sql<string>`min(${emailQueueTable.firstAttemptAt})::text` })
+    .from(emailQueueTable)
+    .where(and(
+      eq(emailQueueTable.mailboxId, box.id),
+      isNotNull(emailQueueTable.firstAttemptAt),
+      gte(emailQueueTable.firstAttemptAt, hourAgo),
+    ));
+
+  const nextReleaseAt = oldestRow?.t
+    ? new Date(new Date(oldestRow.t).getTime() + 3_600_000).toISOString()
+    : null;
+
+  const usedThisHour  = usedRow?.count    ?? 0;
+  const deferredCount = deferredRow?.count ?? 0;
+
+  res.json({
+    hourlyLimit:    box.maxPerHour ?? 100,
+    usedThisHour,
+    remainingQuota: Math.max(0, (box.maxPerHour ?? 100) - usedThisHour),
+    deferredCount,
+    retryQueueCount: deferredCount,
+    nextReleaseAt,
   });
 });
 
@@ -311,11 +415,6 @@ router.post("/mailbox/test-imap", requireAuth, async (req, res): Promise<void> =
 });
 
 // ─── POST /api/mailbox/send ───────────────────────────────────────────────────
-/**
- * Enqueue emails for rate-limited delivery.
- * Body: { templateId, rows, style, useSignatureBuilder, batchSize? }
- * Returns: { jobId, total, batchSize, delaySeconds }
- */
 router.post("/mailbox/send", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
 
@@ -390,8 +489,6 @@ router.post("/mailbox/send", requireAuth, async (req, res): Promise<void> => {
   }
 
   await db.insert(emailQueueTable).values(entries);
-
-  // Kick off background processing (does not block the response)
   processJobQueue(jobId, box, template, freshUser).catch(console.error);
 
   res.json({
@@ -422,40 +519,44 @@ router.get("/mailbox/send/status/:jobId", requireAuth, async (req, res): Promise
     return;
   }
 
-  const total     = items.length;
-  const sent      = items.filter(i => i.status === "success").length;
-  const failed    = items.filter(i => i.status === "failed").length;
-  const sending   = items.filter(i => i.status === "sending").length;
-  const queued    = items.filter(i => i.status === "pending").length;
-  const remaining = queued + sending;
+  const total    = items.length;
+  const sent     = items.filter(i => i.status === "success").length;
+  const failed   = items.filter(i => i.status === "failed").length;
+  const deferred = items.filter(i => i.status === "deferred").length;
+  const sending  = items.filter(i => i.status === "sending").length;
+  const queued   = items.filter(i => i.status === "pending").length;
+  const remaining = queued + sending + deferred;
 
-  // Hourly stats
   const hourAgo = new Date(Date.now() - 3_600_000);
   const [box] = await db.select().from(mailboxesTable).where(eq(mailboxesTable.userId, user.id));
 
+  // True quota: count all attempts in rolling window
   const [hourlyRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(emailQueueTable)
     .where(and(
-      eq(emailQueueTable.userId, user.id),
-      eq(emailQueueTable.status, "success"),
-      gte(emailQueueTable.sentAt, hourAgo),
+      eq(emailQueueTable.mailboxId, box?.id ?? 0),
+      isNotNull(emailQueueTable.firstAttemptAt),
+      gte(emailQueueTable.firstAttemptAt, hourAgo),
     ));
 
   const sentThisHour = hourlyRow?.count ?? 0;
-  const hourlyLimit  = box?.maxPerHour   ?? 100;
+  const hourlyLimit  = box?.maxPerHour  ?? 100;
   const delaySeconds = box?.delaySeconds ?? 15;
   const etaSeconds   = remaining * delaySeconds;
   const isRunning    = activeJobs.has(jobId);
   const isDone       = remaining === 0;
 
   const results = items.map(i => ({
-    email:    i.email,
-    subject:  i.subject,
-    status:   i.status,
-    error:    i.lastError ?? undefined,
-    sentAt:   i.sentAt,
-    attempts: i.attempts,
+    email:        i.email,
+    subject:      i.subject,
+    status:       i.status,
+    error:        i.lastError ?? undefined,
+    errorLabel:   i.status === "deferred" ? decodedErrorLabel(i.lastError) : undefined,
+    retryAfter:   i.retryAfter?.toISOString() ?? null,
+    deferredCount: i.deferredCount,
+    sentAt:       i.sentAt,
+    attempts:     i.attempts,
   }));
 
   res.json({
@@ -464,6 +565,7 @@ router.get("/mailbox/send/status/:jobId", requireAuth, async (req, res): Promise
     total,
     sent,
     failed,
+    deferred,
     queued:              remaining,
     remaining,
     etaSeconds,
@@ -475,22 +577,41 @@ router.get("/mailbox/send/status/:jobId", requireAuth, async (req, res): Promise
   });
 });
 
+function decodedErrorLabel(raw: string | null | undefined): string {
+  if (!raw) return "Temporary failure";
+  const decoded = decodeQuotedPrintable(raw);
+  const s = decoded.toLowerCase();
+  if (s.includes("max emails per hour") || s.includes("sending limit") || s.includes("rate limit") || /\b421\b/.test(s))
+    return "Hourly sending limit exceeded by provider.";
+  if (s.includes("too many") || s.includes("slow down")) return "Rate limit — too many sends.";
+  if (s.includes("temporary") || /\b451\b/.test(s)) return "Temporary server failure.";
+  return decoded.length > 120 ? decoded.slice(0, 120) + "…" : decoded;
+}
+
+function decodeQuotedPrintable(str: string): string {
+  return str
+    .replace(/=\r?\n/g, "")
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 // ─── POST /api/mailbox/send/retry/:jobId ──────────────────────────────────────
 router.post("/mailbox/send/retry/:jobId", requireAuth, async (req, res): Promise<void> => {
   const user  = req.user!;
   const jobId = req.params.jobId;
 
-  // Reset failed items to pending
+  // Reset failed/deferred items to pending
   await db
     .update(emailQueueTable)
-    .set({ status: "pending", attempts: 0, lastError: null })
+    .set({ status: "pending", attempts: 0, deferredCount: 0, lastError: null, retryAfter: null })
     .where(and(
       eq(emailQueueTable.jobId, jobId),
       eq(emailQueueTable.userId, user.id),
-      eq(emailQueueTable.status, "failed"),
+      or(
+        eq(emailQueueTable.status, "failed"),
+        eq(emailQueueTable.status, "deferred"),
+      )
     ));
 
-  // Restart the background loop if it stopped
   if (!activeJobs.has(jobId)) {
     const [box] = await db
       .select()
@@ -530,20 +651,20 @@ router.post("/mailbox/send/cancel/:jobId", requireAuth, async (req, res): Promis
   const user  = req.user!;
   const jobId = req.params.jobId;
 
-  // Signal the loop to stop
   activeJobs.delete(jobId);
 
-  // Mark all pending items as failed
   await db
     .update(emailQueueTable)
     .set({ status: "failed", lastError: "Cancelled by user" })
     .where(and(
       eq(emailQueueTable.jobId, jobId),
       eq(emailQueueTable.userId, user.id),
-      eq(emailQueueTable.status, "pending"),
+      or(
+        eq(emailQueueTable.status, "pending"),
+        eq(emailQueueTable.status, "deferred"),
+      )
     ));
 
-  // Also reset any stuck "sending" items
   await db
     .update(emailQueueTable)
     .set({ status: "failed", lastError: "Cancelled by user" })

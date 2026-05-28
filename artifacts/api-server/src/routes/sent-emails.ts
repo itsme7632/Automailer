@@ -14,6 +14,13 @@ import type { User } from "@workspace/db";
 
 const router: IRouter = Router();
 
+/** Decode MIME quoted-printable encoding (e.g. =E2=80=99 → ') */
+function decodeQuotedPrintable(str: string): string {
+  return str
+    .replace(/=\r?\n/g, "")
+    .replace(/=([0-9A-Fa-f]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 function userBranding(user: User): BrandingSettings {
   return {
     agentName:      user.agentName      ?? null,
@@ -33,14 +40,15 @@ function validStyle(s?: string | null): EmailStyle {
   return valid.includes(s as EmailStyle) ? (s as EmailStyle) : "clean";
 }
 
-/** Human-readable SMTP error label */
+/** Human-readable SMTP error label — decodes MIME quoted-printable before matching */
 export function parseSMTPError(raw?: string | null): string {
   if (!raw) return "Unknown error";
-  const s = raw.toLowerCase();
+  const decoded = decodeQuotedPrintable(raw);
+  const s = decoded.toLowerCase();
   if (s.includes("mailbox full") || s.includes("over quota") || s.includes("user over") || s.includes("452")) return "Mailbox full";
   if (s.includes("user not found") || s.includes("user unknown") || s.includes("no such user") || s.includes("does not exist") || /\b550\b/.test(s)) return "Invalid email address";
   if (s.includes("blocked") || s.includes("banned") || s.includes("blacklist") || s.includes("dnsbl")) return "Blocked by provider";
-  if (s.includes("rate limit") || s.includes("too many") || s.includes("slow down") || /\b421\b/.test(s)) return "Rate limit exceeded";
+  if (s.includes("rate limit") || s.includes("too many") || s.includes("slow down") || /\b421\b/.test(s) || s.includes("max emails per hour") || s.includes("sending limit")) return "Rate limit exceeded";
   if (s.includes("spam") || s.includes("junk") || s.includes("content filter")) return "Flagged as spam";
   if (s.includes("temporary") || /\b451\b/.test(s)) return "Temporary failure — retry later";
   if (s.includes("connection timed out") || s.includes("etimedout")) return "Connection timeout";
@@ -48,7 +56,7 @@ export function parseSMTPError(raw?: string | null): string {
   if (s.includes("auth") || s.includes("535") || s.includes("credentials")) return "SMTP authentication failed";
   if (s.includes("relay") || s.includes("relaying denied")) return "Relay denied";
   if (s.includes("ssl") || s.includes("tls") || s.includes("certificate")) return "TLS/SSL error";
-  return raw.length > 80 ? raw.slice(0, 80) + "…" : raw;
+  return decoded.length > 80 ? decoded.slice(0, 80) + "…" : decoded;
 }
 
 async function getTrackingStatsForIds(
@@ -94,30 +102,42 @@ async function getTrackingStatsForIds(
   return stats;
 }
 
+function retryMinutesRemaining(retryAfter: Date | null | undefined): number | null {
+  if (!retryAfter) return null;
+  const ms = retryAfter.getTime() - Date.now();
+  return ms > 0 ? Math.ceil(ms / 60_000) : 0;
+}
+
 function formatItem(item: any, tracking: Record<string, any>) {
   let row: Record<string, string> = {};
   try { row = JSON.parse(item.rowDataJson); } catch { }
   const stats = item.trackingId ? (tracking[item.trackingId] ?? null) : null;
+  const isDeferred = item.status === "deferred";
+  const isFailed   = item.status === "failed";
+  const retryMins  = isDeferred ? retryMinutesRemaining(item.retryAfter) : null;
   return {
-    id:             item.id,
-    campaignId:     item.campaignId,
-    leadId:         item.leadId,
-    email:          item.email,
-    customerName:   row.name ?? row.companyName ?? null,
-    quoteId:        item.quoteId ?? row.quote_id ?? null,
-    subject:        item.subject,
-    sentAt:         item.sentAt?.toISOString() ?? null,
-    mailboxEmail:   item.mailboxEmail ?? null,
+    id:              item.id,
+    campaignId:      item.campaignId,
+    leadId:          item.leadId,
+    email:           item.email,
+    customerName:    row.name ?? row.companyName ?? null,
+    quoteId:         item.quoteId ?? row.quote_id ?? null,
+    subject:         item.subject,
+    sentAt:          item.sentAt?.toISOString() ?? null,
+    mailboxEmail:    item.mailboxEmail ?? null,
     mailboxFromName: item.mailboxFromName ?? null,
-    status:         item.status,
-    lastError:      item.lastError ?? null,
-    errorLabel:     item.status === "failed" ? parseSMTPError(item.lastError) : null,
-    trackingId:     item.trackingId ?? null,
-    templateId:     item.templateId,
-    style:          item.style,
-    openCount:      stats?.openCount ?? 0,
-    firstOpenedAt:  stats?.firstOpenedAt ?? null,
-    lastOpenedAt:   stats?.lastOpenedAt ?? null,
+    status:          item.status,
+    lastError:       item.lastError ?? null,
+    errorLabel:      (isFailed || isDeferred) ? parseSMTPError(item.lastError) : null,
+    retryAfter:      item.retryAfter?.toISOString() ?? null,
+    retryMinutes:    retryMins,
+    deferredCount:   item.deferredCount ?? 0,
+    trackingId:      item.trackingId ?? null,
+    templateId:      item.templateId,
+    style:           item.style,
+    openCount:       stats?.openCount ?? 0,
+    firstOpenedAt:   stats?.firstOpenedAt ?? null,
+    lastOpenedAt:    stats?.lastOpenedAt ?? null,
   };
 }
 

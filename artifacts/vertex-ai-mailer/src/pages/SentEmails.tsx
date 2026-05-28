@@ -25,6 +25,9 @@ type SentEmail = {
   status: string;
   lastError: string | null;
   errorLabel: string | null;
+  retryAfter: string | null;
+  retryMinutes: number | null;
+  deferredCount: number;
   trackingId: string | null;
   openCount: number;
   firstOpenedAt: string | null;
@@ -64,9 +67,28 @@ async function apiPatch(path: string): Promise<void> {
   if (!res.ok) throw new Error(`Request failed (${res.status})`);
 }
 
-function TrackingBadge({ status, trackingId, openCount, errorLabel }: {
+function TrackingBadge({ status, trackingId, openCount, errorLabel, retryMinutes, deferredCount }: {
   status: string; trackingId: string | null; openCount: number; errorLabel: string | null;
+  retryMinutes?: number | null; deferredCount?: number;
 }) {
+  if (status === "deferred") {
+    return (
+      <div>
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
+          <Clock className="h-3 w-3" /> Deferred
+        </span>
+        {errorLabel && (
+          <p className="text-xs text-amber-600 mt-1 max-w-[160px] leading-tight">{errorLabel}</p>
+        )}
+        {retryMinutes != null && retryMinutes > 0 && (
+          <p className="text-xs text-amber-500 mt-0.5">Next retry: {retryMinutes} min</p>
+        )}
+        {retryMinutes === 0 && (
+          <p className="text-xs text-amber-500 mt-0.5">Retrying soon…</p>
+        )}
+      </div>
+    );
+  }
   if (status === "failed") {
     return (
       <div>
@@ -561,7 +583,7 @@ export default function SentEmails() {
                       ) : <span className="text-slate-400 text-sm">—</span>}
                     </TableCell>
                     <TableCell>
-                      <TrackingBadge status={email.status} trackingId={email.trackingId} openCount={email.openCount} errorLabel={email.errorLabel} />
+                      <TrackingBadge status={email.status} trackingId={email.trackingId} openCount={email.openCount} errorLabel={email.errorLabel} retryMinutes={email.retryMinutes} deferredCount={email.deferredCount} />
                       {email.firstOpenedAt && (
                         <div className="text-xs text-slate-400 mt-1">First: {new Date(email.firstOpenedAt).toLocaleDateString()}</div>
                       )}
