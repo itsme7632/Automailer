@@ -14,6 +14,9 @@ import {
   Server,
   CreditCard,
   SendHorizonal,
+  Layers,
+  Megaphone,
+  LayoutGrid,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -27,13 +30,15 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 
 const NAV_ITEMS = [
-  { href: "/dashboard",    icon: LayoutDashboard, label: "Dashboard",       exact: true },
-  { href: "/templates",    icon: FileText,        label: "Templates",       exact: false },
-  { href: "/leads/import", icon: UploadCloud,     label: "Upload & Send",   exact: true },
-  { href: "/sent-emails",  icon: SendHorizonal,   label: "Sent Emails",     exact: false },
-  { href: "/drafts",       icon: Mail,            label: "Gmail Drafts",    exact: false },
-  { href: "/mailbox",      icon: Server,          label: "Mailbox",         exact: true },
-  { href: "/plans",        icon: CreditCard,      label: "Plans & Billing", exact: true },
+  { href: "/dashboard",         icon: LayoutDashboard, label: "Dashboard",        exact: true },
+  { href: "/templates",         icon: FileText,        label: "Templates",        exact: true },
+  { href: "/templates/gallery", icon: LayoutGrid,      label: "Template Gallery", exact: true },
+  { href: "/leads/import",      icon: UploadCloud,     label: "Upload & Send",    exact: true },
+  { href: "/campaigns",         icon: Megaphone,       label: "Campaigns",        exact: false },
+  { href: "/sent-emails",       icon: SendHorizonal,   label: "Sent Emails",      exact: false },
+  { href: "/drafts",            icon: Mail,            label: "Gmail Drafts",     exact: false },
+  { href: "/mailbox",           icon: Server,          label: "Mailbox",          exact: true },
+  { href: "/plans",             icon: CreditCard,      label: "Plans & Billing",  exact: true },
 ];
 
 function NavItem({

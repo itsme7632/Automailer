@@ -10,7 +10,9 @@
  *  - Table layout, inline CSS + media queries — Gmail mobile / Outlook / Apple Mail safe
  */
 
-export type EmailStyle = "clean" | "modern" | "minimal" | "luxury";
+export type EmailStyle =
+  | "clean" | "modern" | "minimal" | "luxury"
+  | "corporate" | "urgent" | "dispatch" | "friendly" | "mobile" | "dark";
 
 /** User's company settings — drives header and optional signature automatically */
 export interface BrandingSettings {
@@ -22,6 +24,7 @@ export interface BrandingSettings {
   usdot?:          string | null;
   mcNumber?:       string | null;
   accentColor?:    string | null;
+  logoUrl?:        string | null;
 }
 
 export interface EmailBuildOptions {
@@ -51,14 +54,12 @@ export function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-/** Validate hex color to prevent CSS injection */
 function safeColor(color?: string | null): string {
   if (!color) return "";
   const c = color.trim();
   return /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : "";
 }
 
-/** Plain-text variable replacement — lead vars only ({name}, {vehicle}, {price}, etc.) */
 export function replaceVarsText(text: string, row: Record<string, string>): string {
   return text.replace(/\{([^}]+)\}/g, (match, key) => {
     const k = key.trim();
@@ -68,7 +69,6 @@ export function replaceVarsText(text: string, row: Record<string, string>): stri
   });
 }
 
-/** HTML variable replacement — applies visual emphasis on transport-specific fields */
 function replaceVarsHtml(text: string, row: Record<string, string>): string {
   return text.replace(/\{([^}]+)\}/g, (match, key) => {
     const k = key.trim();
@@ -86,34 +86,28 @@ function replaceVarsHtml(text: string, row: Record<string, string>): string {
   });
 }
 
-function textToHtmlParagraphs(text: string, fontFamily: string, color: string): string {
+function textToHtmlParagraphs(text: string, fontFamily: string, color: string, fontSize = "15px"): string {
   return text
     .split(/\n\n+/)
     .filter(p => p.trim())
     .map(para =>
-      `<p class="em-p" style="margin:0 0 16px;font-family:${fontFamily};color:${color};font-size:15px;line-height:1.75;">${
+      `<p class="em-p" style="margin:0 0 16px;font-family:${fontFamily};color:${color};font-size:${fontSize};line-height:1.75;">${
         para.trim().replace(/\n/g, "<br>")
       }</p>`
     )
     .join("");
 }
 
-/**
- * Shared <head> block with reset CSS and responsive media queries.
- * The .em-* classes are overridden on small screens.
- */
 function sharedHead(extraCss = ""): string {
   return `<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <title></title>
 <style type="text/css">
-/* Client reset */
 body,table,td,p,a,li{-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
 table,td{mso-table-lspace:0pt;mso-table-rspace:0pt;border-collapse:collapse;}
 img{-ms-interpolation-mode:bicubic;border:0;height:auto;outline:none;text-decoration:none;}
 body{margin:0!important;padding:0!important;width:100%!important;}
-/* Mobile overrides — supported by modern Gmail, Apple Mail, Samsung Mail */
 @media only screen and (max-width:600px){
   .em-wrapper{padding:0!important;}
   .em-wrapper-td{padding:12px 0!important;}
@@ -129,18 +123,18 @@ ${extraCss}
 </style>`;
 }
 
-/**
- * Builds the optional auto-signature from branding settings.
- * `agentNameOverride` comes from row.agent_name (per-lead CSV column).
- * Falls back to branding.agentName when CSV column is not present.
- * All company details come from BrandingSettings — not template variables.
- * Returns empty string if nothing meaningful to show.
- */
+function buildLogoHtml(branding: BrandingSettings, maxWidth = 120, maxHeight = 44): string {
+  if (!branding.logoUrl) return "";
+  const alt = branding.companyName ? escapeHtml(branding.companyName) : "Company Logo";
+  return `<img src="${branding.logoUrl}" alt="${alt}" width="${maxWidth}" height="${maxHeight}" style="display:block;width:auto;max-width:${maxWidth}px;max-height:${maxHeight}px;height:auto;border:0;outline:none;text-decoration:none;" />`;
+}
+
 function buildSignatureHtml(
   agentNameOverride: string,
   branding: BrandingSettings,
   borderColor: string,
-  fontFamily: string
+  fontFamily: string,
+  textColor = "#64748b"
 ): string {
   const rawName = agentNameOverride?.trim() || branding.agentName?.trim() || "";
   const name    = rawName                        ? escapeHtml(rawName)                        : "";
@@ -153,18 +147,22 @@ function buildSignatureHtml(
 
   if (!name && !company && !phone && !website && !usdot && !mc) return "";
 
+  const nameColor = textColor === "#c8d3e0" ? "#e2e8f0" : "#1e293b";
+  const compColor = textColor === "#c8d3e0" ? "#cbd5e1" : "#374151";
+  const linkColor = textColor === "#c8d3e0" ? "#93c5fd" : "#2563eb";
+
   const lines: string[] = [];
-  if (name)    lines.push(`<strong style="color:#1e293b;font-size:14px;">${name}</strong>`);
+  if (name)    lines.push(`<strong style="color:${nameColor};font-size:14px;">${name}</strong>`);
   if (company) {
     const companyLine = tagline
-      ? `<span style="color:#374151;">${company}</span> <span style="color:#94a3b8;font-size:12px;">${tagline}</span>`
-      : `<span style="color:#374151;">${company}</span>`;
+      ? `<span style="color:${compColor};">${company}</span> <span style="color:${textColor};font-size:12px;">${tagline}</span>`
+      : `<span style="color:${compColor};">${company}</span>`;
     lines.push(companyLine);
   }
   if (phone)   lines.push(phone);
   if (website) {
     const href = /^https?:\/\//.test(website) ? website : `https://${website}`;
-    lines.push(`<a href="${href}" style="color:#2563eb;text-decoration:none;">${website}</a>`);
+    lines.push(`<a href="${href}" style="color:${linkColor};text-decoration:none;">${website}</a>`);
   }
   const creds: string[] = [];
   if (usdot) creds.push(`USDOT #${usdot}`);
@@ -173,7 +171,7 @@ function buildSignatureHtml(
 
   return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top:24px;">
 <tr><td class="em-sig" style="padding-top:20px;border-top:1px solid ${borderColor};">
-<p style="margin:0;font-family:${fontFamily};color:#64748b;font-size:13px;line-height:2.0;">
+<p style="margin:0;font-family:${fontFamily};color:${textColor};font-size:13px;line-height:2.0;">
 Best regards,<br>${lines.join("<br>")}
 </p>
 </td></tr>
@@ -182,14 +180,6 @@ Best regards,<br>${lines.join("<br>")}
 
 // ─── Master builder ───────────────────────────────────────────────────────────
 
-/**
- * Builds a complete, mobile-responsive HTML email.
- *
- * @param body     - Raw template body text with {variable} placeholders
- * @param row      - Lead-specific values from CSV
- * @param branding - User's company settings — header/signature only, never hardcoded
- * @param options  - style + useSignatureBuilder toggle
- */
 export function buildHtmlEmail(
   body: string,
   row: Record<string, string>,
@@ -200,10 +190,16 @@ export function buildHtmlEmail(
   const useSig = options.useSignatureBuilder ?? false;
 
   switch (style) {
-    case "luxury":  return luxuryTemplate(body, row, branding, useSig);
-    case "modern":  return modernTemplate(body, row, branding, useSig);
-    case "minimal": return minimalTemplate(body, row, branding, useSig);
-    default:        return cleanTemplate(body, row, branding, useSig);
+    case "luxury":    return luxuryTemplate(body, row, branding, useSig);
+    case "modern":    return modernTemplate(body, row, branding, useSig);
+    case "minimal":   return minimalTemplate(body, row, branding, useSig);
+    case "corporate": return corporateTemplate(body, row, branding, useSig);
+    case "urgent":    return urgentTemplate(body, row, branding, useSig);
+    case "dispatch":  return dispatchTemplate(body, row, branding, useSig);
+    case "friendly":  return friendlyTemplate(body, row, branding, useSig);
+    case "mobile":    return mobileTemplate(body, row, branding, useSig);
+    case "dark":      return darkTemplate(body, row, branding, useSig);
+    default:          return cleanTemplate(body, row, branding, useSig);
   }
 }
 
@@ -216,11 +212,13 @@ function cleanTemplate(
   const accent  = safeColor(branding.accentColor) || "#1d4ed8";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 120, 44);
 
-  const headerRow = company
+  const headerRow = (company || logoHtml)
     ? `<tr>
         <td class="em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:24px 40px;">
-          <p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>` : ""}
           ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.78);font-size:12px;font-weight:400;letter-spacing:0.3px;line-height:1.4;">${tagline}</p>` : ""}
         </td>
       </tr>`
@@ -256,11 +254,13 @@ function modernTemplate(
   const accent  = safeColor(branding.accentColor) || "#4f46e5";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 120, 44);
 
-  const headerRow = company
+  const headerRow = (company || logoHtml)
     ? `<tr>
         <td class="em-hdr" bgcolor="${accent}" style="background-color:${accent};padding:28px 40px;">
-          <p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p class="em-co" style="margin:0${tagline ? " 0 5px" : ""};font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;line-height:1.3;">${company}</p>` : ""}
           ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.78);font-size:12px;font-weight:400;letter-spacing:0.3px;line-height:1.4;">${tagline}</p>` : ""}
         </td>
       </tr>`
@@ -296,11 +296,13 @@ function minimalTemplate(
   const accent  = safeColor(branding.accentColor) || "#2563eb";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 100, 36);
 
-  const companyRow = company
+  const companyRow = (company || logoHtml)
     ? `<tr>
         <td class="em-hdr" style="padding:28px 0 18px;border-bottom:1px solid #e2e8f0;">
-          <p class="em-co" style="margin:0${tagline ? " 0 4px" : ""};font-family:${FONT};color:${accent};font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${company}</p>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "8px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p class="em-co" style="margin:0${tagline ? " 0 4px" : ""};font-family:${FONT};color:${accent};font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">${company}</p>` : ""}
           ${tagline ? `<p class="em-tag" style="margin:0;font-family:${FONT};color:#64748b;font-size:11px;font-weight:400;letter-spacing:0.5px;text-transform:uppercase;">${tagline}</p>` : ""}
         </td>
       </tr>
@@ -337,10 +339,13 @@ function luxuryTemplate(
   const BODY_FONT    = "Georgia, 'Times New Roman', serif";
   const company      = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
   const tagline      = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml     = buildLogoHtml(branding, 120, 44);
 
-  const headerPad    = company ? "30px 40px" : "14px 40px";
-  const headerInner  = company
-    ? `<p class="em-co" style="margin:0${tagline ? " 0 6px" : ""};font-family:${HEADING_FONT};color:#f8fafc;font-size:22px;font-weight:700;letter-spacing:0.5px;line-height:1.3;">${company}</p>
+  const hasHeader    = company || logoHtml;
+  const headerPad    = hasHeader ? "30px 40px" : "14px 40px";
+  const headerInner  = hasHeader
+    ? `${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+       ${company ? `<p class="em-co" style="margin:0${tagline ? " 0 6px" : ""};font-family:${HEADING_FONT};color:#f8fafc;font-size:22px;font-weight:700;letter-spacing:0.5px;line-height:1.3;">${company}</p>` : ""}
        ${tagline ? `<p class="em-tag" style="margin:0;font-family:${HEADING_FONT};color:rgba(212,175,55,0.85);font-size:11px;font-weight:400;letter-spacing:1.5px;text-transform:uppercase;">${tagline}</p>` : ""}`
     : "";
 
@@ -374,6 +379,321 @@ function luxuryTemplate(
 <tr>
   <td class="em-lux-foot" bgcolor="#0f172a" style="background-color:#0f172a;padding:14px 48px;border-bottom:2px solid #d97706;border-left:1px solid #1e293b;border-right:1px solid #1e293b;">
     <p style="margin:0;font-size:1px;line-height:1px;">&#160;</p>
+  </td>
+</tr>
+</table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ─── Style: Corporate ─────────────────────────────────────────────────────────
+
+function corporateTemplate(
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+): string {
+  const FONT    = "Arial, Helvetica, sans-serif";
+  const accent  = safeColor(branding.accentColor) || "#0a2558";
+  const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 130, 46);
+
+  const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#cbd5e1", FONT) : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-corp-top{padding:20px 20px!important;}
+  .em-corp-body{padding:28px 20px 28px!important;}
+  .em-corp-foot{padding:12px 20px!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#eef2f7;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#eef2f7" style="background-color:#eef2f7;width:100%;">
+<tr><td align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border-top:4px solid ${accent};">
+<tr>
+  <td class="em-corp-top" bgcolor="${accent}" style="background-color:${accent};padding:28px 40px;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td style="vertical-align:middle;">
+          ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p class="em-co" style="margin:0;font-family:${FONT};color:#ffffff;font-size:19px;font-weight:700;letter-spacing:0.3px;line-height:1.3;">${company}</p>` : ""}
+          ${tagline ? `<p style="margin:3px 0 0;font-family:${FONT};color:rgba(255,255,255,0.65);font-size:11px;letter-spacing:0.8px;text-transform:uppercase;">${tagline}</p>` : ""}
+        </td>
+        <td align="right" style="vertical-align:middle;">
+          <p style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.5);font-size:10px;letter-spacing:1.5px;text-transform:uppercase;">AUTO TRANSPORT</p>
+          <p style="margin:2px 0 0;font-family:${FONT};color:rgba(255,255,255,0.35);font-size:10px;letter-spacing:1px;text-transform:uppercase;">QUOTE</p>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+<tr>
+  <td class="em-corp-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+<tr>
+  <td class="em-corp-foot" style="padding:14px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;">
+    <p style="margin:0;font-family:${FONT};color:#94a3b8;font-size:11px;letter-spacing:0.5px;">CONFIDENTIAL AUTO TRANSPORT QUOTE</p>
+  </td>
+</tr>
+</table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ─── Style: Urgent ────────────────────────────────────────────────────────────
+
+function urgentTemplate(
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+): string {
+  const FONT    = "Arial, Helvetica, sans-serif";
+  const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 120, 40);
+
+  const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#fecaca", FONT) : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-urg-banner{padding:14px 20px!important;}
+  .em-urg-body{padding:28px 20px!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#fff5f5;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#fff5f5" style="background-color:#fff5f5;width:100%;">
+<tr><td align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #fecaca;border-top:4px solid #dc2626;">
+<tr>
+  <td class="em-urg-banner" bgcolor="#dc2626" style="background-color:#dc2626;padding:18px 40px;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td>
+          ${logoHtml ? `<div style="margin-bottom:8px;">${logoHtml}</div>` : ""}
+          ${company ? `<p style="margin:0 0 2px;font-family:${FONT};color:#ffffff;font-size:16px;font-weight:700;">${company}</p>` : ""}
+        </td>
+        <td align="right">
+          <span style="display:inline-block;padding:4px 10px;background-color:rgba(255,255,255,0.18);font-family:${FONT};color:#ffffff;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;border:1px solid rgba(255,255,255,0.35);">&#9889; TIME-SENSITIVE</span>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+<tr>
+  <td class="em-urg-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+<tr>
+  <td style="padding:12px 40px;background-color:#fff5f5;border-top:1px solid #fecaca;">
+    <p style="margin:0;font-family:${FONT};color:#ef4444;font-size:11px;">This quote is time-sensitive. Please respond promptly.</p>
+  </td>
+</tr>
+</table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ─── Style: Dispatch ──────────────────────────────────────────────────────────
+
+function dispatchTemplate(
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+): string {
+  const FONT    = "Arial, Helvetica, sans-serif";
+  const accent  = safeColor(branding.accentColor) || "#065f46";
+  const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 120, 44);
+
+  const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#a7f3d0", FONT) : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-disp-hdr{padding:20px 20px!important;}
+  .em-disp-body{padding:28px 20px!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#f0fdf4;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f0fdf4" style="background-color:#f0fdf4;width:100%;">
+<tr><td align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #d1fae5;">
+<tr>
+  <td class="em-disp-hdr" bgcolor="${accent}" style="background-color:${accent};padding:24px 40px;">
+    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+      <tr>
+        <td>
+          ${logoHtml ? `<div style="margin-bottom:${company ? "8px" : "0"};">${logoHtml}</div>` : ""}
+          ${company ? `<p style="margin:0;font-family:${FONT};color:#ffffff;font-size:18px;font-weight:700;">${company}</p>` : ""}
+          ${tagline ? `<p style="margin:3px 0 0;font-family:${FONT};color:rgba(255,255,255,0.7);font-size:12px;">${tagline}</p>` : ""}
+        </td>
+        <td align="right">
+          <p style="margin:0;font-family:${FONT};color:rgba(255,255,255,0.6);font-size:10px;letter-spacing:1.2px;text-transform:uppercase;">DISPATCH QUOTE</p>
+          <p style="margin:3px 0 0;font-family:${FONT};color:rgba(255,255,255,0.4);font-size:9px;letter-spacing:0.8px;text-transform:uppercase;">AUTO TRANSPORT</p>
+        </td>
+      </tr>
+    </table>
+  </td>
+</tr>
+<tr>
+  <td class="em-disp-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+<tr>
+  <td style="padding:12px 40px;background-color:#f0fdf4;border-top:1px solid #d1fae5;">
+    <p style="margin:0;font-family:${FONT};color:#059669;font-size:11px;letter-spacing:0.3px;">&#10003; Dispatch-ready quote from a licensed auto transport broker</p>
+  </td>
+</tr>
+</table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ─── Style: Friendly ──────────────────────────────────────────────────────────
+
+function friendlyTemplate(
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+): string {
+  const FONT    = "Arial, Helvetica, sans-serif";
+  const accent  = safeColor(branding.accentColor) || "#0369a1";
+  const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 120, 44);
+
+  const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#bae6fd", FONT) : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-fr-hdr{padding:20px 20px!important;}
+  .em-fr-body{padding:28px 20px!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#f0f9ff;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#f0f9ff" style="background-color:#f0f9ff;width:100%;">
+<tr><td align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #bae6fd;border-radius:0;">
+<tr>
+  <td class="em-fr-hdr" bgcolor="${accent}" style="background-color:${accent};padding:26px 40px;">
+    ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+    ${company ? `<p style="margin:0;font-family:${FONT};color:#ffffff;font-size:20px;font-weight:700;">${company}</p>` : ""}
+    ${tagline ? `<p style="margin:4px 0 0;font-family:${FONT};color:rgba(255,255,255,0.75);font-size:13px;">${tagline}</p>` : ""}
+  </td>
+</tr>
+<tr>
+  <td class="em-fr-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+<tr>
+  <td style="padding:14px 40px;background-color:#f0f9ff;border-top:1px solid #bae6fd;">
+    <p style="margin:0;font-family:${FONT};color:#0ea5e9;font-size:12px;">Questions? We're always here to help. Just reply to this email.</p>
+  </td>
+</tr>
+</table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ─── Style: Mobile ────────────────────────────────────────────────────────────
+
+function mobileTemplate(
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+): string {
+  const FONT    = "Arial, Helvetica, sans-serif";
+  const accent  = safeColor(branding.accentColor) || "#1e40af";
+  const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 100, 36);
+
+  const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b", "17px");
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-mob-card{width:100%!important;max-width:100%!important;}
+  .em-mob-body{padding:28px 20px!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#ffffff;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff;width:100%;">
+<tr><td align="center" style="padding:32px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="560" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-mob-card em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:560px;max-width:560px;border-top:3px solid ${accent};">
+<tr>
+  <td style="padding:28px 0 16px;">
+    ${logoHtml ? `<div style="margin-bottom:12px;">${logoHtml}</div>` : ""}
+    ${company ? `<p style="margin:0;font-family:${FONT};color:${accent};font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;">${company}</p>` : ""}
+  </td>
+</tr>
+<tr>
+  <td class="em-mob-body" style="padding:8px 0 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+</table>
+<!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
+</td></tr>
+</table>
+</body>
+</html>`;
+}
+
+// ─── Style: Dark ──────────────────────────────────────────────────────────────
+
+function darkTemplate(
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+): string {
+  const FONT    = "Arial, Helvetica, sans-serif";
+  const accent  = safeColor(branding.accentColor) || "#3b82f6";
+  const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
+  const tagline = branding.companyTagline?.trim() ? escapeHtml(branding.companyTagline.trim()) : "";
+  const logoHtml = buildLogoHtml(branding, 120, 44);
+
+  const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#cbd5e1");
+  const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#334155", FONT, "#c8d3e0") : "";
+
+  return `<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head>${sharedHead(`
+@media only screen and (max-width:600px){
+  .em-dark-hdr{padding:22px 20px!important;}
+  .em-dark-body{padding:28px 20px!important;}
+  .em-p{color:#cbd5e1!important;}
+}`)}</head>
+<body style="margin:0;padding:0;background-color:#0f172a;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" bgcolor="#0f172a" style="background-color:#0f172a;width:100%;">
+<tr><td align="center" style="padding:40px 16px;">
+<!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
+<table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#1e293b;border:1px solid #334155;border-top:3px solid ${accent};">
+<tr>
+  <td class="em-dark-hdr" style="background-color:#1e293b;padding:28px 40px;border-bottom:1px solid #334155;">
+    ${logoHtml ? `<div style="margin-bottom:${company ? "10px" : "0"};">${logoHtml}</div>` : ""}
+    ${company ? `<p class="em-co" style="margin:0;font-family:${FONT};color:#f1f5f9;font-size:20px;font-weight:700;">${company}</p>` : ""}
+    ${tagline ? `<p style="margin:4px 0 0;font-family:${FONT};color:#64748b;font-size:12px;">${tagline}</p>` : ""}
+  </td>
+</tr>
+<tr>
+  <td class="em-dark-body" style="background-color:#1e293b;padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+</tr>
+<tr>
+  <td style="background-color:#0f172a;padding:14px 40px;border-top:1px solid #1e293b;">
+    <p style="margin:0;font-family:${FONT};color:#475569;font-size:11px;">Auto Transport Quote &mdash; Sent via BrokerMail</p>
   </td>
 </tr>
 </table>

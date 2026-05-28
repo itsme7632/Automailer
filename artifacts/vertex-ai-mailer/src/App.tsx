@@ -19,6 +19,7 @@ import Dashboard from "@/pages/Dashboard";
 import LeadsImport from "@/pages/LeadsImport";
 import Templates from "@/pages/Templates";
 import TemplateEditor from "@/pages/TemplateEditor";
+import TemplateGallery from "@/pages/TemplateGallery";
 import Drafts from "@/pages/Drafts";
 import Settings from "@/pages/Settings";
 import MailboxSettings from "@/pages/MailboxSettings";
@@ -78,6 +79,13 @@ function Router() {
       <Route path="/leads/import">
         <ProtectedRoute>
           <AppLayout><LeadsImport /></AppLayout>
+        </ProtectedRoute>
+      </Route>
+
+      {/* Template Gallery MUST come before /templates/:id */}
+      <Route path="/templates/gallery">
+        <ProtectedRoute>
+          <AppLayout><TemplateGallery /></AppLayout>
         </ProtectedRoute>
       </Route>
 

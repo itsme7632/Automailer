@@ -41,14 +41,20 @@ interface ParseResult {
   headers: string[];
 }
 
-type EmailStyle = "clean" | "modern" | "minimal" | "luxury";
+type EmailStyle = "clean" | "modern" | "minimal" | "luxury" | "corporate" | "urgent" | "dispatch" | "friendly" | "mobile" | "dark";
 type SendMode   = "gmail" | "smtp";
 
 const EMAIL_STYLES: { value: EmailStyle; label: string; desc: string; bg: string }[] = [
-  { value: "clean",   label: "Clean",   desc: "Blue header",        bg: "#1d4ed8" },
-  { value: "modern",  label: "Modern",  desc: "Purple accent",      bg: "#4f46e5" },
-  { value: "minimal", label: "Minimal", desc: "White, thin accent", bg: "#e2e8f0" },
-  { value: "luxury",  label: "Luxury",  desc: "Dark navy, gold",    bg: "#0f172a" },
+  { value: "clean",     label: "Clean",           desc: "Blue header",         bg: "#1d4ed8" },
+  { value: "modern",    label: "Modern",           desc: "Purple accent",       bg: "#4f46e5" },
+  { value: "minimal",   label: "Minimal",          desc: "White, thin accent",  bg: "#e2e8f0" },
+  { value: "luxury",    label: "Luxury",           desc: "Dark navy, gold",     bg: "#0f172a" },
+  { value: "corporate", label: "Corporate",        desc: "Deep navy, formal",   bg: "#0a2558" },
+  { value: "urgent",    label: "Urgent",           desc: "Red, time-sensitive", bg: "#dc2626" },
+  { value: "dispatch",  label: "Dispatch",         desc: "Green, logistics",    bg: "#065f46" },
+  { value: "friendly",  label: "Friendly Broker",  desc: "Sky blue, warm",      bg: "#0369a1" },
+  { value: "mobile",    label: "Mobile Optimized", desc: "Minimal, large text", bg: "#e2e8f0" },
+  { value: "dark",      label: "Dark Mode",        desc: "Dark navy, modern",   bg: "#1e293b" },
 ];
 
 function rowToRecord(row: ParsedRow): Record<string, string> {

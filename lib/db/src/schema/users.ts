@@ -27,6 +27,7 @@ export const usersTable = pgTable("users", {
   accentColor: text("accent_color"),
   agentName: text("agent_name"),
   useSignature: boolean("use_signature").notNull().default(false),
+  logoUrl: text("logo_url"),
   // ── Plan / Credits / Status ───────────────────────────────────────────────
   plan: text("plan").notNull().default("free"),
   credits: integer("credits").notNull().default(0),

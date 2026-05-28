@@ -19,7 +19,24 @@ All email creation goes through `gmail.users.drafts.create` — never `messages.
 Uses OpenAI `gpt-4o-mini` with `response_format: { type: "json_object" }`. Template variables ({name}, {vehicle}, {route}, etc.) applied before AI personalizes. Tone options: professional, friendly, sales, followup, urgent.
 
 ## DB push
-Run `pnpm --filter @workspace/db run push` to apply schema. Tables: users, campaigns, leads, templates, drafts, activity, system_logs.
+Run `pnpm --filter @workspace/db run push` to apply schema. Tables: users, campaigns, leads, templates, drafts, activity, system_logs, email_queue.
+
+## emailQueueTable schema notes
+`emailQueueTable` in `lib/db/src/schema/email_queue.ts` has NO `updatedAt` column. Columns: id, jobId, userId, mailboxId, templateId, campaignId, leadId, email, subject, rowDataJson, style, useSignatureBuilder, status, attempts, lastError, quoteId, trackingId, sentAt, createdAt.
+
+**Why:** Avoid silent Drizzle errors — never set `updatedAt` on this table.
+
+## Email Templates (10 total)
+EmailStyle type: `"clean" | "modern" | "minimal" | "luxury" | "corporate" | "urgent" | "dispatch" | "friendly" | "mobile" | "dark"`. All templates support `logoUrl` in `BrandingSettings`. Logo stored as base64 data URL in `users.logo_url`.
+
+## Logo upload
+`POST /api/users/logo` accepts `{ logoDataUrl: "data:image/..." }` or `{ remove: true }`. Max 600 KB in frontend validation. Note: Gmail may not render inline images.
+
+## Sent Emails / Failed Email Recovery
+`GET /api/sent-emails?statusFilter=delivered|failed|opened|unopened|all&page=N&limit=N&campaignId=N`
+- `POST /api/sent-emails/:id/retry` — re-sends with original template/mailbox/branding
+- `POST /api/sent-emails/:id/edit-resend` — accepts `{toEmail, subject, note}`
+- `PATCH /api/sent-emails/:id/ignore` — sets status="ignored"
 
 ## Lib build order
 `pnpm run typecheck:libs` must run before api-server typecheck so DB composite lib emits declarations. Without this, all schema imports show "no exported member" errors.

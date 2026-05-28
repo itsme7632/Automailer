@@ -15,7 +15,7 @@ import {
   ArrowLeft, Send, Clock, CheckCircle2, XCircle, Loader2,
   Gauge, RotateCcw, ChevronDown, ChevronUp, Play, Layers,
   Mail, Server, FileText, AlertTriangle, RefreshCw, Inbox,
-  Users, Timer, BarChart3, Eye, TrendingUp,
+  Users, Timer, BarChart3, Eye, TrendingUp, ExternalLink,
 } from "lucide-react";
 import { SendProgressPanel } from "@/components/SendProgressPanel";
 
@@ -510,24 +510,35 @@ export default function CampaignDetail() {
 
       {/* ─── Done banner ──────────────────────────────────────────────────────── */}
       {isDone && progress && progress.total > 0 && (
-        <div className={`rounded-2xl border p-5 flex items-center gap-4 ${
+        <div className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center gap-4 ${
           (progress.failed ?? 0) > 0
             ? "bg-amber-50 border-amber-200"
             : "bg-emerald-50 border-emerald-200"
         }`}>
-          {(progress.failed ?? 0) > 0
-            ? <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0" />
-            : <CheckCircle2 className="h-6 w-6 text-emerald-600 flex-shrink-0" />}
-          <div>
-            <p className={`font-bold text-sm ${(progress.failed ?? 0) > 0 ? "text-amber-900" : "text-emerald-900"}`}>
-              {(progress.failed ?? 0) > 0
-                ? `Campaign complete — ${progress.sent} sent, ${progress.failed} failed`
-                : `All ${progress.sent} ${isSmtp ? "emails sent" : "drafts created"} successfully!`}
-            </p>
-            <p className={`text-xs mt-0.5 ${(progress.failed ?? 0) > 0 ? "text-amber-700" : "text-emerald-700"}`}>
-              {isSmtp ? "Check your Sent folder for delivery confirmations." : "Review your Gmail Drafts folder."}
-            </p>
+          <div className="flex items-start gap-3 flex-1 min-w-0">
+            {(progress.failed ?? 0) > 0
+              ? <AlertTriangle className="h-6 w-6 text-amber-600 flex-shrink-0 mt-0.5" />
+              : <CheckCircle2 className="h-6 w-6 text-emerald-600 flex-shrink-0 mt-0.5" />}
+            <div>
+              <p className={`font-bold text-sm ${(progress.failed ?? 0) > 0 ? "text-amber-900" : "text-emerald-900"}`}>
+                {(progress.failed ?? 0) > 0
+                  ? `Campaign complete — ${progress.sent} sent, ${progress.failed} failed`
+                  : `All ${progress.sent} ${isSmtp ? "emails sent" : "drafts created"} successfully!`}
+              </p>
+              <p className={`text-xs mt-0.5 ${(progress.failed ?? 0) > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                {(progress.failed ?? 0) > 0
+                  ? "Use the Sent Emails page to retry or ignore failed emails."
+                  : isSmtp ? "Check your Sent folder for delivery confirmations." : "Review your Gmail Drafts folder."}
+              </p>
+            </div>
           </div>
+          {(progress.failed ?? 0) > 0 && (
+            <Button asChild size="sm" variant="outline" className="rounded-xl gap-1.5 border-amber-300 text-amber-800 hover:bg-amber-100 flex-shrink-0">
+              <Link href="/sent-emails">
+                <ExternalLink className="h-3.5 w-3.5" /> Retry Failed Emails
+              </Link>
+            </Button>
+          )}
         </div>
       )}
 
@@ -652,13 +663,14 @@ export default function CampaignDetail() {
                       <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 hidden sm:table-cell">Vehicle</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500 hidden md:table-cell">Route</th>
                       <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold text-slate-500">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {isLeadsLoading ? (
                       Array(5).fill(0).map((_, i) => (
                         <tr key={i}>
-                          {[...Array(5)].map((_, j) => (
+                          {[...Array(6)].map((_, j) => (
                             <td key={j} className="px-4 py-3">
                               <Skeleton className="h-4 w-full" />
                             </td>
@@ -667,7 +679,7 @@ export default function CampaignDetail() {
                       ))
                     ) : leadsData?.data?.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="px-4 py-10 text-center text-xs text-slate-400">
+                        <td colSpan={6} className="px-4 py-10 text-center text-xs text-slate-400">
                           No leads in this campaign yet.
                         </td>
                       </tr>
@@ -700,6 +712,15 @@ export default function CampaignDetail() {
                               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold capitalize ${statusBadge[lead.status] ?? "bg-slate-100 text-slate-600"}`}>
                                 {lead.status}
                               </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {lead.status === "failed" && (
+                                <Button asChild variant="ghost" size="sm" className="h-6 px-2 text-xs rounded-lg text-red-600 hover:bg-red-50 gap-1">
+                                  <Link href="/sent-emails">
+                                    <RotateCcw className="h-3 w-3" /> Retry
+                                  </Link>
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         );
