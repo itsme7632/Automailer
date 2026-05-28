@@ -227,6 +227,190 @@ export async function processCampaignJobQueue(
   }
 }
 
+// ─── Fully automated campaign processor (campaign-level, not batch-level) ────
+export async function processCampaignFully(
+  campaignId: number,
+  box: typeof mailboxesTable.$inferSelect,
+  template: typeof templatesTable.$inferSelect,
+  user: User,
+) {
+  const key = `campaign:${campaignId}`;
+  if (activeJobs.get(key)) return;
+  activeJobs.set(key, true);
+
+  const branding    = userBranding(user);
+  const fromAddress = box.fromName
+    ? `"${box.fromName.replace(/"/g, "")}" <${box.smtpUser}>`
+    : box.smtpUser;
+
+  try {
+    while (activeJobs.get(key)) {
+      const [camp] = await db.select({ status: campaignsTable.status })
+        .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+      if (!camp || camp.status === "paused" || camp.status === "cancelled") break;
+
+      // Hourly-limit check
+      const hourAgo = new Date(Date.now() - 3_600_000);
+      const [hourlyRow] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(emailQueueTable)
+        .where(and(
+          eq(emailQueueTable.userId, user.id),
+          eq(emailQueueTable.status, "success"),
+          gte(emailQueueTable.sentAt, hourAgo),
+        ));
+      const sentThisHour = hourlyRow?.count ?? 0;
+      const maxPerHour   = box.maxPerHour ?? 100;
+
+      if (sentThisHour >= maxPerHour) {
+        const cooldownUntil = new Date(Date.now() + 3_600_000);
+        await db.update(campaignsTable).set({
+          status: "cooling_down", cooldownUntil, updatedAt: new Date(),
+        }).where(eq(campaignsTable.id, campaignId));
+        await sleep(60_000);
+        const now = new Date();
+        if (now >= cooldownUntil) {
+          await db.update(campaignsTable).set({
+            status: "sending", cooldownUntil: null, updatedAt: new Date(),
+          }).where(eq(campaignsTable.id, campaignId));
+        }
+        continue;
+      }
+
+      // Clear cooling_down if we're below the limit now
+      const [campNow] = await db.select({ status: campaignsTable.status })
+        .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+      if (campNow?.status === "cooling_down") {
+        await db.update(campaignsTable).set({
+          status: "sending", cooldownUntil: null, updatedAt: new Date(),
+        }).where(eq(campaignsTable.id, campaignId));
+      }
+
+      // Grab next pending item for this campaign
+      const [item] = await db.select()
+        .from(emailQueueTable)
+        .where(and(
+          eq(emailQueueTable.campaignId, campaignId),
+          eq(emailQueueTable.status, "pending"),
+        ))
+        .orderBy(emailQueueTable.id)
+        .limit(1);
+
+      if (!item) break; // Nothing left — done!
+
+      await db.update(emailQueueTable).set({ status: "sending" }).where(eq(emailQueueTable.id, item.id));
+
+      const delay = (box.delaySeconds ?? 15) * 1000;
+      await sleep(delay);
+
+      // Re-check pause / cancel after delay
+      const [campAfter] = await db.select({ status: campaignsTable.status })
+        .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+      if (!campAfter || campAfter.status === "paused" || campAfter.status === "cancelled") {
+        await db.update(emailQueueTable).set({ status: "pending" }).where(eq(emailQueueTable.id, item.id));
+        break;
+      }
+
+      // ── Send email ────────────────────────────────────────────────────────
+      const row = JSON.parse(item.rowDataJson) as Record<string, string>;
+      if (row.price) row.price = formatPrice(row.price);
+
+      const subject  = replaceVarsText(template.subject, row);
+      const bodyText = replaceVarsText(template.body, row);
+      const bodyHtml = buildHtmlEmail(template.body, row, branding, {
+        style: (item.style ?? "clean") as any,
+        useSignatureBuilder: item.useSignatureBuilder,
+      });
+
+      const trackingId  = randomUUID();
+      const publicBase  = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (process.env.PUBLIC_URL ?? "http://localhost:3000");
+      const pixelTag    = `<img src="${publicBase}/api/track/open/${trackingId}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0;" />`;
+      const trackedHtml = bodyHtml.includes("</body>")
+        ? bodyHtml.replace(/<\/body>/i, `${pixelTag}</body>`)
+        : bodyHtml + pixelTag;
+
+      try {
+        const info = await sendEmail(box, { to: item.email, subject, text: bodyText, html: trackedHtml });
+
+        if (box.imapHost && box.imapUser && box.imapPassEncrypted) {
+          const raw = buildRawMessage({
+            from: fromAddress, to: item.email, subject,
+            html: trackedHtml, text: bodyText, messageId: info.messageId,
+          });
+          saveToSent(box, raw).catch(() => {});
+        }
+
+        await db.insert(draftsTable).values({
+          userId: user.id, campaignId, leadId: item.leadId ?? null,
+          email: item.email, subject, body: bodyText, status: "success",
+          trackingId, gmailDraftId: `smtp:${info.messageId}`,
+        });
+
+        await db.update(emailQueueTable)
+          .set({ status: "success", sentAt: new Date(), trackingId })
+          .where(eq(emailQueueTable.id, item.id));
+
+        if (item.leadId) {
+          await db.update(leadsTable)
+            .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
+            .where(eq(leadsTable.id, item.leadId));
+        }
+
+        await db.update(campaignsTable).set({
+          sentCount: sql`${campaignsTable.sentCount} + 1`,
+          status: "sending",
+          cooldownUntil: null,
+          updatedAt: new Date(),
+        }).where(eq(campaignsTable.id, campaignId));
+
+      } catch (err: any) {
+        const errMsg   = String(err?.message ?? "Send failed");
+        const attempts = item.attempts + 1;
+
+        await db.insert(draftsTable).values({
+          userId: user.id, campaignId, leadId: item.leadId ?? null,
+          subject, body: bodyText, status: "failed", errorMessage: errMsg,
+        });
+
+        if (attempts >= 3) {
+          await db.update(emailQueueTable)
+            .set({ status: "failed", attempts, lastError: errMsg })
+            .where(eq(emailQueueTable.id, item.id));
+          if (item.leadId) {
+            await db.update(leadsTable)
+              .set({ status: "failed", errorMessage: errMsg, updatedAt: new Date() })
+              .where(eq(leadsTable.id, item.leadId));
+          }
+          await db.update(campaignsTable).set({
+            failedCount: sql`${campaignsTable.failedCount} + 1`,
+            updatedAt: new Date(),
+          }).where(eq(campaignsTable.id, campaignId));
+        } else {
+          await db.update(emailQueueTable)
+            .set({ status: "pending", attempts, lastError: errMsg })
+            .where(eq(emailQueueTable.id, item.id));
+        }
+      }
+    }
+  } finally {
+    activeJobs.delete(key);
+
+    const [camp] = await db.select({ status: campaignsTable.status })
+      .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+
+    if (camp && camp.status !== "paused" && camp.status !== "cancelled") {
+      const [pendingQ] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(emailQueueTable)
+        .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, "pending")));
+      if ((pendingQ?.count ?? 0) === 0) {
+        await db.update(campaignsTable).set({ status: "completed", updatedAt: new Date() })
+          .where(eq(campaignsTable.id, campaignId));
+      }
+    }
+  }
+}
+
 // ─── GET /api/campaigns ───────────────────────────────────────────────────────
 router.get("/campaigns", requireAuth, async (req, res): Promise<void> => {
   const user = req.user!;
@@ -406,7 +590,28 @@ router.get("/campaigns/:id/progress", requireAuth, async (req, res): Promise<voi
     }
   }
 
-  const isJobActive = campaign.currentJobId ? activeJobs.has(campaign.currentJobId) : false;
+  const campaignKey = `campaign:${campaignId}`;
+  const legacyKey   = campaign.currentJobId ?? "";
+  const isJobActive = activeJobs.has(campaignKey) || activeJobs.has(legacyKey);
+
+  // Currently-sending email (for real-time display)
+  let currentlySendingEmail: string | null = null;
+  let estimatedCompletionSeconds = 0;
+  if (campaign.sendMode === "smtp") {
+    const [sendingItem] = await db.select({ email: emailQueueTable.email })
+      .from(emailQueueTable)
+      .where(and(
+        eq(emailQueueTable.campaignId, campaignId),
+        eq(emailQueueTable.status, "sending"),
+      ))
+      .limit(1);
+    currentlySendingEmail = sendingItem?.email ?? null;
+
+    const [box2] = await db.select({ delaySeconds: mailboxesTable.delaySeconds })
+      .from(mailboxesTable).where(eq(mailboxesTable.userId, user.id));
+    const delayS = box2?.delaySeconds ?? 15;
+    estimatedCompletionSeconds = (queued + remaining) * (delayS + 1);
+  }
 
   res.json({
     total, sent, queued, failed, remaining,
@@ -416,6 +621,8 @@ router.get("/campaigns/:id/progress", requireAuth, async (req, res): Promise<voi
     isJobActive,
     sendMode: campaign.sendMode,
     status: campaign.status,
+    currentlySendingEmail,
+    estimatedCompletionSeconds,
   });
 });
 
@@ -635,6 +842,191 @@ router.post("/campaigns/:id/send-batch", requireAuth, async (req, res): Promise<
 
     res.json({ mode: "gmail", total: nextLeads.length, succeeded, failed, errors });
   }
+});
+
+// ─── POST /api/campaigns/:id/start-campaign ──────────────────────────────────
+/**
+ * Start the fully automated campaign engine. Queues ALL remaining leads and
+ * processes them automatically — handling cooldowns and retries with no user
+ * interaction required.
+ */
+router.post("/campaigns/:id/start-campaign", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  const [campaign] = await db.select().from(campaignsTable)
+    .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+  if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+  if (campaign.status === "sending" || campaign.status === "cooling_down") {
+    res.status(400).json({ error: "Campaign is already running." }); return;
+  }
+  if (campaign.status === "completed" || campaign.status === "cancelled") {
+    res.status(400).json({ error: "Campaign has already finished." }); return;
+  }
+  if (!campaign.templateId) {
+    res.status(400).json({ error: "Campaign has no template assigned." }); return;
+  }
+  if (campaign.sendMode !== "smtp") {
+    res.status(400).json({ error: "Automated sending is only available for SMTP mode." }); return;
+  }
+
+  const [template] = await db.select().from(templatesTable)
+    .where(and(eq(templatesTable.id, campaign.templateId), eq(templatesTable.userId, user.id)));
+  if (!template) { res.status(404).json({ error: "Template not found." }); return; }
+
+  const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+  if (!freshUser) { res.status(404).json({ error: "User not found." }); return; }
+
+  const [box] = await db.select().from(mailboxesTable)
+    .where(and(eq(mailboxesTable.userId, user.id), eq(mailboxesTable.isActive, true)));
+  if (!box) { res.status(400).json({ error: "No active SMTP mailbox configured." }); return; }
+
+  // Get ALL remaining new leads
+  const newLeads = await db.select().from(leadsTable)
+    .where(and(eq(leadsTable.campaignId, campaignId), eq(leadsTable.status, "new")))
+    .orderBy(leadsTable.id);
+
+  // Check for any still-pending queue items (e.g. from a previous paused run)
+  const [pendingCount] = await db.select({ count: sql<number>`count(*)::int` })
+    .from(emailQueueTable)
+    .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, "pending")));
+
+  if (newLeads.length === 0 && (pendingCount?.count ?? 0) === 0) {
+    res.status(400).json({ error: "No remaining leads to send." }); return;
+  }
+
+  const jobId      = randomUUID();
+  const emailStyle = (["clean", "modern", "minimal", "luxury"] as const).includes(campaign.emailStyle as any)
+    ? campaign.emailStyle as any : "clean";
+  const useSig     = campaign.useSignature ?? freshUser.useSignature ?? false;
+
+  // Enqueue all new leads
+  if (newLeads.length > 0) {
+    const entries: (typeof emailQueueTable.$inferInsert)[] = [];
+    for (const lead of newLeads) {
+      if (!lead.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(lead.email)) continue;
+      const row: Record<string, string> = {
+        name: lead.name ?? "", email: lead.email,
+        vehicle: lead.vehicle ?? "", route: lead.route ?? "",
+        pickup: lead.pickup ?? "", delivery: lead.delivery ?? "",
+        price: lead.price ?? "", notes: lead.notes ?? "",
+        quote_id: lead.quoteId ?? "",
+      };
+      entries.push({
+        jobId,
+        userId: user.id, mailboxId: box.id, templateId: template.id,
+        campaignId, leadId: lead.id, email: lead.email,
+        subject: replaceVarsText(template.subject, row),
+        rowDataJson: JSON.stringify(row),
+        style: emailStyle, useSignatureBuilder: useSig,
+        quoteId: lead.quoteId ?? null, status: "pending",
+      });
+    }
+
+    if (entries.length > 0) {
+      for (let i = 0; i < entries.length; i += 500) {
+        await db.insert(emailQueueTable).values(entries.slice(i, i + 500));
+      }
+      const leadIds = newLeads.map(l => l.id);
+      for (let i = 0; i < leadIds.length; i += 500) {
+        await db.update(leadsTable)
+          .set({ status: "queued", updatedAt: new Date() })
+          .where(inArray(leadsTable.id, leadIds.slice(i, i + 500)));
+      }
+    }
+  }
+
+  await db.insert(campaignBatchesTable).values({
+    campaignId, userId: user.id, jobId, sendMode: "smtp",
+    batchSize: newLeads.length, mailboxEmail: box.smtpUser,
+  });
+
+  await db.update(campaignsTable).set({
+    currentJobId: jobId, status: "sending", cooldownUntil: null, updatedAt: new Date(),
+  }).where(eq(campaignsTable.id, campaignId));
+
+  processCampaignFully(campaignId, box, template, freshUser).catch(console.error);
+
+  res.json({
+    mode: "smtp", total: newLeads.length,
+    delaySeconds: box.delaySeconds ?? 15,
+    hourlyLimit: box.maxPerHour ?? 100,
+  });
+});
+
+// ─── POST /api/campaigns/:id/pause ────────────────────────────────────────────
+router.post("/campaigns/:id/pause", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  const [campaign] = await db.select().from(campaignsTable)
+    .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+  if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+  await db.update(campaignsTable)
+    .set({ status: "paused", updatedAt: new Date() })
+    .where(eq(campaignsTable.id, campaignId));
+
+  // Signal the loop to stop (it checks DB status each iteration)
+  activeJobs.delete(`campaign:${campaignId}`);
+
+  res.json({ status: "paused" });
+});
+
+// ─── POST /api/campaigns/:id/resume ───────────────────────────────────────────
+router.post("/campaigns/:id/resume", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  const [campaign] = await db.select().from(campaignsTable)
+    .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+  if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+  if (!campaign.templateId) {
+    res.status(400).json({ error: "Campaign has no template." }); return;
+  }
+
+  const [template] = await db.select().from(templatesTable)
+    .where(and(eq(templatesTable.id, campaign.templateId), eq(templatesTable.userId, user.id)));
+  if (!template) { res.status(404).json({ error: "Template not found." }); return; }
+
+  const [freshUser] = await db.select().from(usersTable).where(eq(usersTable.id, user.id));
+  if (!freshUser) { res.status(404).json({ error: "User not found." }); return; }
+
+  const [box] = await db.select().from(mailboxesTable)
+    .where(and(eq(mailboxesTable.userId, user.id), eq(mailboxesTable.isActive, true)));
+  if (!box) { res.status(400).json({ error: "No active SMTP mailbox configured." }); return; }
+
+  await db.update(campaignsTable)
+    .set({ status: "sending", cooldownUntil: null, updatedAt: new Date() })
+    .where(eq(campaignsTable.id, campaignId));
+
+  processCampaignFully(campaignId, box, template, freshUser).catch(console.error);
+
+  res.json({ status: "sending" });
+});
+
+// ─── POST /api/campaigns/:id/cancel ───────────────────────────────────────────
+router.post("/campaigns/:id/cancel", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  const [campaign] = await db.select().from(campaignsTable)
+    .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+  if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+  await db.update(campaignsTable)
+    .set({ status: "cancelled", updatedAt: new Date() })
+    .where(eq(campaignsTable.id, campaignId));
+
+  activeJobs.delete(`campaign:${campaignId}`);
+
+  res.json({ status: "cancelled" });
 });
 
 // ─── GET /api/campaigns/:id/batches ──────────────────────────────────────────

@@ -16,6 +16,7 @@ import {
   Gauge, RotateCcw, ChevronDown, ChevronUp, Play, Layers,
   Mail, Server, FileText, AlertTriangle, RefreshCw, Inbox,
   Users, Timer, BarChart3, Eye, TrendingUp, ExternalLink,
+  Pause, Ban, Zap,
 } from "lucide-react";
 import { SendProgressPanel } from "@/components/SendProgressPanel";
 
@@ -36,6 +37,8 @@ interface CampaignProgress {
   isJobActive: boolean;
   sendMode: string;
   status: string;
+  currentlySendingEmail: string | null;
+  estimatedCompletionSeconds: number;
 }
 
 interface CampaignBatch {
@@ -105,6 +108,9 @@ export default function CampaignDetail() {
   const [activeJobId, setActiveJobId]     = useState<string | null>(null);
   const [jobDelay, setJobDelay]           = useState(15);
   const [delaySettings, setDelaySettings] = useState(15);
+  const [isStarting, setIsStarting]       = useState(false);
+  const [isPausing, setIsPausing]         = useState(false);
+  const [isCancelling, setIsCancelling]   = useState(false);
 
   const cooldownLeft = useCooldownTimer(progress?.cooldownSeconds ?? 0);
 
@@ -193,7 +199,7 @@ export default function CampaignDetail() {
     return () => clearInterval(interval);
   }, [campaignId, fetchProgress]);
 
-  // ─── Send next batch ─────────────────────────────────────────────────────────
+  // ─── Gmail: send next batch (drafts mode only) ───────────────────────────────
   async function handleSendBatch(size: number) {
     setIsSending(true);
     try {
@@ -226,6 +232,87 @@ export default function CampaignDetail() {
       toast({ variant: "destructive", title: "Send Error", description: err.message });
     } finally {
       setIsSending(false);
+    }
+  }
+
+  // ─── SMTP: fully automated start / pause / resume / cancel ──────────────────
+  async function handleStartCampaign() {
+    setIsStarting(true);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res   = await fetch(`/api/campaigns/${campaignId}/start-campaign`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to start campaign");
+      toast({
+        title: "Campaign started",
+        description: `Sending ${data.total} emails automatically with ${data.delaySeconds}s delay.`,
+      });
+      await Promise.all([fetchProgress(), fetchBatches()]);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Start Error", description: err.message });
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  async function handlePauseCampaign() {
+    setIsPausing(true);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res   = await fetch(`/api/campaigns/${campaignId}/pause`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to pause");
+      toast({ title: "Campaign paused", description: "Sending will stop after the current email." });
+      await fetchProgress();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Pause Error", description: err.message });
+    } finally {
+      setIsPausing(false);
+    }
+  }
+
+  async function handleResumeCampaign() {
+    setIsStarting(true);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res   = await fetch(`/api/campaigns/${campaignId}/resume`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to resume");
+      toast({ title: "Campaign resumed", description: "Automated sending has resumed." });
+      await fetchProgress();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Resume Error", description: err.message });
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
+  async function handleCancelCampaign() {
+    setIsCancelling(true);
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res   = await fetch(`/api/campaigns/${campaignId}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to cancel");
+      toast({ title: "Campaign cancelled", description: "The campaign has been cancelled." });
+      await Promise.all([fetchProgress(), fetchBatches()]);
+      queryClient.invalidateQueries({ queryKey: getGetCampaignQueryKey(campaignId) });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Cancel Error", description: err.message });
+    } finally {
+      setIsCancelling(false);
     }
   }
 
@@ -264,17 +351,28 @@ export default function CampaignDetail() {
 
   const pct      = progress && progress.total > 0
     ? Math.round(((progress.sent + progress.queued) / progress.total) * 100) : 0;
-  const isSmtp   = (progress?.sendMode ?? campaign.sendMode) === "smtp";
-  const isDone   = progress?.remaining === 0 && (progress?.queued ?? 0) === 0;
-  const isActive = progress?.isJobActive ?? false;
+  const isSmtp    = (progress?.sendMode ?? campaign.sendMode) === "smtp";
+  const isDone    = progress?.status === "completed" || progress?.status === "cancelled" ||
+    (progress?.remaining === 0 && (progress?.queued ?? 0) === 0 && !progress?.isJobActive);
+  const isActive  = progress?.isJobActive ?? false;
+  const isCooling = progress?.status === "cooling_down";
+  const isPaused  = progress?.status === "paused";
+  const isCancelledStatus = progress?.status === "cancelled";
 
   const statusColors: Record<string, string> = {
-    pending:   "bg-amber-100 text-amber-800",
-    sending:   "bg-blue-100 text-blue-800",
-    paused:    "bg-slate-100 text-slate-600",
-    completed: "bg-emerald-100 text-emerald-800",
-    failed:    "bg-red-100 text-red-800",
-    drafted:   "bg-violet-100 text-violet-800",
+    pending:      "bg-amber-100 text-amber-800",
+    sending:      "bg-blue-100 text-blue-800",
+    cooling_down: "bg-orange-100 text-orange-800",
+    paused:       "bg-slate-100 text-slate-600",
+    completed:    "bg-emerald-100 text-emerald-800",
+    failed:       "bg-red-100 text-red-800",
+    drafted:      "bg-violet-100 text-violet-800",
+    cancelled:    "bg-slate-100 text-slate-500",
+  };
+
+  const statusLabels: Record<string, string> = {
+    cooling_down: "Cooling Down",
+    cancelled:    "Cancelled",
   };
 
   const sendModeLabel = isSmtp ? "SMTP Direct" : "Gmail Drafts";
@@ -293,8 +391,8 @@ export default function CampaignDetail() {
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-slate-900 truncate">{campaign.name}</h1>
             <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${statusColors[campaign.status] ?? "bg-slate-100 text-slate-600"}`}>
-                {campaign.status}
+              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${statusColors[progress?.status ?? campaign.status] ?? "bg-slate-100 text-slate-600"}`}>
+                {statusLabels[progress?.status ?? campaign.status] ?? (progress?.status ?? campaign.status)}
               </span>
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
                 {sendModeIcon} {sendModeLabel}
@@ -397,16 +495,23 @@ export default function CampaignDetail() {
       )}
 
       {/* ─── Cooldown warning ─────────────────────────────────────────────────── */}
-      {cooldownLeft > 0 && (
+      {(isCooling || cooldownLeft > 0) && (
         <div className="flex items-start gap-3 p-4 bg-amber-50 border border-amber-200 rounded-2xl">
-          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-900">Hourly limit reached</p>
+          <Timer className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-900">Cooling down — hourly limit reached</p>
             <p className="text-xs text-amber-700 mt-0.5">
-              Sending will resume automatically. You can also send the next batch manually in{" "}
-              <span className="font-bold">{formatSeconds(cooldownLeft)}</span>.
+              Sending is paused automatically.{" "}
+              {cooldownLeft > 0
+                ? <>Resuming in <span className="font-bold">{formatSeconds(cooldownLeft)}</span> — no action needed.</>
+                : "Resuming shortly…"}
             </p>
           </div>
+          {cooldownLeft > 0 && (
+            <div className="flex-shrink-0 px-3 py-1.5 rounded-xl bg-amber-100 border border-amber-200">
+              <span className="text-sm font-bold text-amber-800">{formatSeconds(cooldownLeft)}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -433,16 +538,111 @@ export default function CampaignDetail() {
         )}
       </AnimatePresence>
 
-      {/* ─── Send Next Batch ──────────────────────────────────────────────────── */}
-      {!isDone && (progress?.remaining ?? 0) > 0 && (
+      {/* ─── SMTP: Automated Campaign Controls ───────────────────────────────── */}
+      {isSmtp && !isCancelledStatus && progress?.status !== "completed" && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-slate-100">
             <div className="flex items-center gap-2">
-              <div className="h-8 w-8 rounded-xl bg-blue-100 flex items-center justify-center flex-shrink-0">
-                <Play className="h-4 w-4 text-blue-600" />
+              <div className={`h-8 w-8 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                isActive || isCooling ? "bg-blue-100" : isPaused ? "bg-amber-100" : "bg-slate-100"
+              }`}>
+                {isActive || isCooling
+                  ? <Zap className="h-4 w-4 text-blue-600" />
+                  : isPaused
+                    ? <Pause className="h-4 w-4 text-amber-600" />
+                    : <Play className="h-4 w-4 text-slate-500" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-bold text-slate-900">
+                  {isActive && !isCooling ? "Campaign Running" :
+                   isCooling ? "Cooling Down" :
+                   isPaused ? "Campaign Paused" : "Ready to Send"}
+                </p>
+                <p className="text-xs text-slate-500 truncate">
+                  {isCooling
+                    ? `Resuming automatically in ${formatSeconds(cooldownLeft)}`
+                    : isActive
+                      ? progress?.currentlySendingEmail
+                        ? `Sending to ${progress.currentlySendingEmail}…`
+                        : `${progress?.remaining ?? 0} leads remaining`
+                      : `${progress?.remaining ?? 0} leads remaining · ${sendModeLabel}`}
+                </p>
+              </div>
+              {progress?.estimatedCompletionSeconds != null && progress.estimatedCompletionSeconds > 0 && isActive && (
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-xs text-slate-400">Est. completion</p>
+                  <p className="text-xs font-semibold text-slate-700">{formatSeconds(progress.estimatedCompletionSeconds)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="px-5 py-4 flex gap-3 flex-wrap">
+            {/* Start Campaign (pending state) */}
+            {!isActive && !isCooling && !isPaused && (progress?.remaining ?? 0) > 0 && (
+              <Button
+                onClick={handleStartCampaign}
+                disabled={isStarting}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl gap-2"
+              >
+                {isStarting
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Starting…</>
+                  : <><Send className="h-4 w-4" /> Start Campaign</>}
+              </Button>
+            )}
+
+            {/* Resume Campaign (paused state) */}
+            {isPaused && (progress?.remaining ?? 0) > 0 && (
+              <Button
+                onClick={handleResumeCampaign}
+                disabled={isStarting}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-xl gap-2"
+              >
+                {isStarting
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Resuming…</>
+                  : <><Play className="h-4 w-4" /> Resume Campaign</>}
+              </Button>
+            )}
+
+            {/* Pause Campaign (running/cooling state) */}
+            {(isActive || isCooling) && (
+              <Button
+                onClick={handlePauseCampaign}
+                disabled={isPausing}
+                variant="outline"
+                className="flex-1 rounded-xl gap-2 border-amber-300 text-amber-800 hover:bg-amber-50"
+              >
+                {isPausing
+                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Pausing…</>
+                  : <><Pause className="h-4 w-4" /> Pause Campaign</>}
+              </Button>
+            )}
+
+            {/* Cancel Campaign (always available unless done) */}
+            <Button
+              onClick={handleCancelCampaign}
+              disabled={isCancelling}
+              variant="outline"
+              className="rounded-xl gap-2 border-red-200 text-red-700 hover:bg-red-50"
+            >
+              {isCancelling
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Cancelling…</>
+                : <><Ban className="h-4 w-4" /> Cancel</>}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Gmail: Send Next Batch (drafts mode only) ────────────────────────── */}
+      {!isSmtp && !isDone && (progress?.remaining ?? 0) > 0 && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="px-5 py-4 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-xl bg-violet-100 flex items-center justify-center flex-shrink-0">
+                <Play className="h-4 w-4 text-violet-600" />
               </div>
               <div>
-                <p className="text-sm font-bold text-slate-900">Send Next Batch</p>
+                <p className="text-sm font-bold text-slate-900">Create Next Batch of Drafts</p>
                 <p className="text-xs text-slate-500">
                   {progress?.remaining ?? 0} leads remaining · {sendModeLabel}
                 </p>
@@ -451,7 +651,6 @@ export default function CampaignDetail() {
           </div>
 
           <div className="px-5 py-4">
-            {/* Batch size selector */}
             <div className="mb-4">
               <label className="text-xs font-semibold text-slate-600 mb-2 block">Batch Size</label>
               <div className="flex gap-2 flex-wrap">
@@ -462,10 +661,10 @@ export default function CampaignDetail() {
                     disabled={n > (progress?.remaining ?? 0)}
                     className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                       batchSize === n
-                        ? "border-blue-500 bg-blue-50 text-blue-800"
+                        ? "border-violet-500 bg-violet-50 text-violet-800"
                         : n > (progress?.remaining ?? 0)
                           ? "border-slate-100 bg-slate-50 text-slate-300 cursor-not-allowed"
-                          : "border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+                          : "border-slate-200 text-slate-600 hover:border-violet-300 hover:bg-violet-50"
                     }`}
                   >
                     {n}
@@ -476,8 +675,8 @@ export default function CampaignDetail() {
                   disabled={(progress?.remaining ?? 0) === 0}
                   className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all ${
                     batchSize === (progress?.remaining ?? 0)
-                      ? "border-blue-500 bg-blue-50 text-blue-800"
-                      : "border-slate-200 text-slate-600 hover:border-blue-300 hover:bg-blue-50"
+                      ? "border-violet-500 bg-violet-50 text-violet-800"
+                      : "border-slate-200 text-slate-600 hover:border-violet-300 hover:bg-violet-50"
                   }`}
                 >
                   All ({progress?.remaining ?? 0})
@@ -485,24 +684,14 @@ export default function CampaignDetail() {
               </div>
             </div>
 
-            {/* Cooldown notice */}
-            {cooldownLeft > 0 && progress?.isHourlyLimitReached && (
-              <div className="mb-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                <Timer className="h-3.5 w-3.5 text-amber-600 flex-shrink-0" />
-                Hourly limit reached. Sending available in {formatSeconds(cooldownLeft)}.
-              </div>
-            )}
-
             <Button
               onClick={() => handleSendBatch(batchSize)}
-              disabled={isSending || isActive || (isSmtp && cooldownLeft > 0 && (progress?.isHourlyLimitReached ?? false))}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-xl gap-2"
+              disabled={isSending}
+              className="w-full bg-violet-600 hover:bg-violet-700 text-white rounded-xl gap-2"
             >
               {isSending
-                ? <><Loader2 className="h-4 w-4 animate-spin" /> Sending…</>
-                : isActive
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Job in progress…</>
-                  : <><Send className="h-4 w-4" /> Send Next {batchSize} {isSmtp ? "emails" : "drafts"}</>}
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating Drafts…</>
+                : <><Mail className="h-4 w-4" /> Create {batchSize} Draft{batchSize !== 1 ? "s" : ""}</>}
             </Button>
           </div>
         </div>
