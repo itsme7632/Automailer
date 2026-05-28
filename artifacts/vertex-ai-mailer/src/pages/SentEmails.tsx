@@ -31,7 +31,7 @@ type SentEmail = {
 type TimelineEvent = { type: string; timestamp: string; detail?: string };
 
 function getAuthHeaders(): Record<string, string> {
-  const token = localStorage.getItem("token") ?? sessionStorage.getItem("token");
+  const token = localStorage.getItem("auth_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

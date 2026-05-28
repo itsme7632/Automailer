@@ -3,11 +3,14 @@ import { useGetTemplates } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import {
   UploadCloud, File as FileIcon, Loader2, CheckCircle2, XCircle,
   AlertCircle, FileText, RefreshCw, PenLine, Server,
-  Mail, ArrowRight, Sparkles,
+  Mail, ArrowRight, Sparkles, Eye, ChevronLeft, ChevronRight,
+  User, AtSign, Car, MapPin, Hash, Clock, Layers, Zap,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
@@ -48,6 +51,223 @@ const EMAIL_STYLES: { value: EmailStyle; label: string; desc: string; bg: string
   { value: "luxury",  label: "Luxury",  desc: "Dark navy, gold",    bg: "#0f172a" },
 ];
 
+function rowToRecord(row: ParsedRow): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(row)) {
+    if (k === "hasValidEmail" || k === "isDuplicate") continue;
+    if (typeof v === "string" && v) out[k] = v;
+  }
+  return out;
+}
+
+// ─── Email Preview Modal ───────────────────────────────────────────────────────
+
+function EmailPreviewModal({
+  open, onClose,
+  templateId, rows, emailStyle, useSignatureBuilder,
+}: {
+  open: boolean;
+  onClose: () => void;
+  templateId: number;
+  rows: ParsedRow[];
+  emailStyle: EmailStyle;
+  useSignatureBuilder: boolean;
+}) {
+  const [index, setIndex] = useState(0);
+  const [html, setHtml]   = useState<string | null>(null);
+  const [subject, setSubject] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState<string | null>(null);
+
+  const current = rows[index];
+  const total   = rows.length;
+
+  const fetchPreview = useCallback(async (idx: number) => {
+    if (!rows[idx]) return;
+    setLoading(true); setError(null); setHtml(null);
+    try {
+      const token = localStorage.getItem("auth_token") ?? "";
+      const res = await fetch("/api/drafts/preview", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId,
+          row: rowToRecord(rows[idx]),
+          style: emailStyle,
+          useSignatureBuilder,
+        }),
+      });
+      if (!res.ok) throw new Error(`Preview failed (${res.status})`);
+      const data = await res.json();
+      setHtml(data.html ?? "");
+      setSubject(data.subject ?? "");
+    } catch (err: any) {
+      setError(err.message ?? "Failed to load preview");
+    } finally {
+      setLoading(false);
+    }
+  }, [rows, templateId, emailStyle, useSignatureBuilder]);
+
+  useEffect(() => {
+    if (open) { setIndex(0); fetchPreview(0); }
+  }, [open]);
+
+  useEffect(() => {
+    if (open) fetchPreview(index);
+  }, [index]);
+
+  function prev() { if (index > 0) setIndex(i => i - 1); }
+  function next() { if (index < total - 1) setIndex(i => i + 1); }
+
+  return (
+    <Dialog open={open} onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-5xl w-full h-[90vh] flex flex-col p-0 gap-0 overflow-hidden">
+        <DialogHeader className="px-5 py-3.5 border-b border-slate-200 flex-shrink-0">
+          <div className="flex items-center justify-between gap-3 min-w-0">
+            <div className="min-w-0">
+              <DialogTitle className="text-sm font-semibold text-slate-900 truncate">
+                {loading ? <Skeleton className="h-4 w-48 inline-block" /> : subject || "Email Preview"}
+              </DialogTitle>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Preview {index + 1} of {total} leads
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              <Button
+                variant="outline" size="sm"
+                onClick={prev} disabled={index === 0}
+                className="h-8 w-8 p-0 rounded-lg"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs font-mono text-slate-500 w-14 text-center">
+                {index + 1} / {total}
+              </span>
+              <Button
+                variant="outline" size="sm"
+                onClick={next} disabled={index >= total - 1}
+                className="h-8 w-8 p-0 rounded-lg"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </DialogHeader>
+
+        <div className="flex flex-1 overflow-hidden min-h-0">
+          {/* Email preview */}
+          <div className="flex-1 overflow-auto bg-slate-50 min-w-0">
+            {loading && (
+              <div className="p-6 space-y-3">
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-48 w-full" />
+                <Skeleton className="h-4 w-1/2" />
+              </div>
+            )}
+            {error && !loading && (
+              <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-400">
+                <AlertCircle className="h-8 w-8 text-slate-300" />
+                <p className="text-sm">{error}</p>
+                <Button variant="outline" size="sm" onClick={() => fetchPreview(index)} className="rounded-lg mt-1">
+                  Retry
+                </Button>
+              </div>
+            )}
+            {html && !loading && (
+              <iframe
+                srcDoc={html}
+                className="w-full h-full border-0 min-h-[500px]"
+                title="Email Preview"
+                sandbox="allow-same-origin"
+              />
+            )}
+          </div>
+
+          {/* Customer details panel */}
+          <div className="w-64 flex-shrink-0 overflow-y-auto border-l border-slate-200 bg-white">
+            <div className="p-4 space-y-4">
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                Customer Details
+              </h3>
+
+              {current && (
+                <div className="space-y-3">
+                  {current.name && (
+                    <div className="flex items-start gap-2">
+                      <User className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Name</p>
+                        <p className="text-sm font-medium text-slate-800 break-words">{current.name}</p>
+                      </div>
+                    </div>
+                  )}
+                  {current.email && (
+                    <div className="flex items-start gap-2">
+                      <AtSign className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Email</p>
+                        <p className="text-xs font-mono text-slate-700 break-all">{current.email}</p>
+                      </div>
+                    </div>
+                  )}
+                  {current.vehicle && (
+                    <div className="flex items-start gap-2">
+                      <Car className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Vehicle</p>
+                        <p className="text-sm text-slate-800 break-words">{current.vehicle}</p>
+                      </div>
+                    </div>
+                  )}
+                  {(current.pickup || current.delivery) && (
+                    <div className="flex items-start gap-2">
+                      <MapPin className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Route</p>
+                        {current.pickup && <p className="text-xs text-slate-700">{current.pickup}</p>}
+                        {current.delivery && (
+                          <p className="text-xs text-slate-700">→ {current.delivery}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {(current as any).quote_id && (
+                    <div className="flex items-start gap-2">
+                      <Hash className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Quote ID</p>
+                        <p className="text-xs font-mono text-violet-700 break-words">{(current as any).quote_id}</p>
+                      </div>
+                    </div>
+                  )}
+                  {current.price && (
+                    <div className="flex items-start gap-2">
+                      <span className="text-xs text-slate-400 font-medium flex-shrink-0 mt-0.5">$</span>
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Price</p>
+                        <p className="text-sm font-semibold text-emerald-700">{current.price}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-slate-100">
+                <p className="text-xs text-slate-400">
+                  Keyboard: ← → to navigate
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────────────────────────
+
 export default function LeadsImport() {
   const { toast }     = useToast();
   const [, navigate]  = useLocation();
@@ -63,6 +283,7 @@ export default function LeadsImport() {
   const [campaignName, setCampaignName]               = useState<string>("");
   const [isCreating, setIsCreating]                   = useState(false);
   const [mailboxConnected, setMailboxConnected]       = useState(false);
+  const [showPreview, setShowPreview]                 = useState(false);
 
   const { data: templates, isLoading: templatesLoading } = useGetTemplates();
 
@@ -76,7 +297,6 @@ export default function LeadsImport() {
     [parseResult]
   );
 
-  // Auto-populate campaign name from filename
   useEffect(() => {
     if (file && !campaignName) {
       const base = file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ");
@@ -171,6 +391,7 @@ export default function LeadsImport() {
 
   const readyCount = readyRows.length;
   const canCreate  = !!selectedTemplate && readyCount > 0 && !!campaignName.trim();
+  const canPreview = !!selectedTemplate && readyCount > 0;
 
   return (
     <div className="space-y-6 max-w-3xl mx-auto">
@@ -347,7 +568,7 @@ export default function LeadsImport() {
                 </div>
                 {!mailboxConnected && (
                   <p className="text-xs text-slate-400 mt-1.5">
-                    <Link href="/settings" className="text-blue-500 hover:underline">Configure SMTP mailbox</Link> to enable direct sending.
+                    <Link href="/mailbox" className="text-blue-500 hover:underline">Configure SMTP mailbox</Link> to enable direct sending.
                   </p>
                 )}
               </div>
@@ -398,27 +619,96 @@ export default function LeadsImport() {
               </div>
             </div>
 
-            {/* Summary + Create */}
-            <div className="px-5 py-4 bg-slate-50">
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div className="text-sm text-slate-600">
-                  <span className="font-bold text-slate-900">{readyCount}</span> leads ready ·{" "}
-                  <span className="font-medium">{selectedTemplate.name}</span> ·{" "}
-                  <span className="capitalize">{emailStyle}</span> style ·{" "}
-                  <span className="capitalize">{sendMode === "gmail" ? "Gmail Drafts" : "SMTP Direct"}</span>
+            {/* Campaign Summary + Actions */}
+            <div className="px-5 py-4 bg-slate-50 space-y-4">
+              {/* Summary grid */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Campaign Summary</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Layers className="h-3.5 w-3.5 text-blue-500" />
+                      <span className="text-xs text-slate-500">Total Leads</span>
+                    </div>
+                    <p className="text-xl font-bold text-slate-900">{readyCount}</p>
+                    {parseResult && (parseResult.invalidRows > 0 || parseResult.duplicateRows > 0) && (
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        +{parseResult.invalidRows + parseResult.duplicateRows} skipped
+                      </p>
+                    )}
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      {sendMode === "gmail"
+                        ? <Mail className="h-3.5 w-3.5 text-blue-500" />
+                        : <Server className="h-3.5 w-3.5 text-blue-500" />}
+                      <span className="text-xs text-slate-500">Method</span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-900">
+                      {sendMode === "gmail" ? "Gmail Drafts" : "SMTP Direct"}
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Zap className="h-3.5 w-3.5 text-amber-500" />
+                      <span className="text-xs text-slate-500">Style</span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-900 capitalize">{emailStyle}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {useSignatureBuilder ? "Signature on" : "No signature"}
+                    </p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-3">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <FileText className="h-3.5 w-3.5 text-violet-500" />
+                      <span className="text-xs text-slate-500">Template</span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-900 truncate">{selectedTemplate?.name}</p>
+                  </div>
                 </div>
+
+                {parseResult && (parseResult.duplicateRows > 0 || parseResult.invalidRows > 0) && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {parseResult.duplicateRows > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 text-xs text-slate-600">
+                        <XCircle className="h-3 w-3 text-slate-400" />
+                        {parseResult.duplicateRows} duplicate{parseResult.duplicateRows !== 1 ? "s" : ""} removed
+                      </span>
+                    )}
+                    {parseResult.invalidRows > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-50 text-xs text-amber-700">
+                        <AlertCircle className="h-3 w-3" />
+                        {parseResult.invalidRows} missing email{parseResult.invalidRows !== 1 ? "s" : ""} skipped
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {canPreview && (
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowPreview(true)}
+                    className="rounded-xl gap-2 border-slate-300"
+                  >
+                    <Eye className="h-4 w-4" /> Preview Emails
+                  </Button>
+                )}
                 <Button
                   onClick={handleCreateCampaign}
                   disabled={!canCreate || isCreating}
-                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl gap-2 px-5"
+                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl gap-2 px-5 ml-auto"
                 >
                   {isCreating
                     ? <><Loader2 className="h-4 w-4 animate-spin" /> Creating…</>
                     : <><Sparkles className="h-4 w-4" /> Create Campaign <ArrowRight className="h-3.5 w-3.5" /></>}
                 </Button>
               </div>
+
               {!campaignName.trim() && (
-                <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                <p className="text-xs text-amber-600 flex items-center gap-1 -mt-2">
                   <AlertCircle className="h-3 w-3" /> Enter a campaign name above to continue.
                 </p>
               )}
@@ -439,6 +729,18 @@ export default function LeadsImport() {
             </Button>
           </div>
         </div>
+      )}
+
+      {/* Email Preview Modal */}
+      {canPreview && selectedTemplate && (
+        <EmailPreviewModal
+          open={showPreview}
+          onClose={() => setShowPreview(false)}
+          templateId={selectedTemplate.id}
+          rows={readyRows}
+          emailStyle={emailStyle}
+          useSignatureBuilder={useSignatureBuilder}
+        />
       )}
     </div>
   );
