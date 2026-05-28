@@ -3,12 +3,12 @@ import { db } from "@workspace/db";
 import { sql } from "drizzle-orm";
 import { testAiConnection } from "../lib/ai";
 import { getOAuthRedirectUri } from "../lib/gmail";
-import { requireAuth } from "../lib/auth";
+import { requireAdmin } from "../lib/auth";
 
 const router: IRouter = Router();
 
-/** Public health / diagnostics endpoint — no auth required */
-router.get("/diagnostics", async (req, res): Promise<void> => {
+/** Admin-only health / diagnostics endpoint */
+router.get("/diagnostics", requireAdmin, async (req, res): Promise<void> => {
   const results: Record<string, any> = {};
 
   // Database
@@ -38,14 +38,14 @@ router.get("/diagnostics", async (req, res): Promise<void> => {
   res.status(allOk ? 200 : 503).json(results);
 });
 
-/** Authenticated AI connection test */
-router.get("/diagnostics/ai", requireAuth, async (req, res): Promise<void> => {
+/** Admin-only AI connection test */
+router.get("/diagnostics/ai", requireAdmin, async (req, res): Promise<void> => {
   const result = await testAiConnection();
   res.status(result.ok ? 200 : 503).json(result);
 });
 
-/** Authenticated full diagnostics (includes AI test) */
-router.get("/diagnostics/full", requireAuth, async (req, res): Promise<void> => {
+/** Admin-only full diagnostics (includes AI test) */
+router.get("/diagnostics/full", requireAdmin, async (req, res): Promise<void> => {
   const results: Record<string, any> = {};
 
   // Database
