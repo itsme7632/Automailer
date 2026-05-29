@@ -25,6 +25,7 @@ import { SendProgressPanel } from "@/components/SendProgressPanel";
 interface CampaignProgress {
   total: number;
   sent: number;
+  sending: number;
   queued: number;
   failed: number;
   remaining: number;
@@ -39,6 +40,27 @@ interface CampaignProgress {
   status: string;
   currentlySendingEmail: string | null;
   estimatedCompletionSeconds: number;
+}
+
+interface CampaignDiagnostics {
+  campaignId: number;
+  status: string;
+  totalLeads: number;
+  sentCount: number;
+  failedCount: number;
+  isJobActive: boolean;
+  currentJobId: string | null;
+  cooldownUntil: string | null;
+  leadCounts: Record<string, number>;
+  queueCounts: Record<string, number>;
+  nextDeferred: {
+    id: number;
+    email: string;
+    retryAfter: string | null;
+    retryInSeconds: number | null;
+    deferredCount: number | null;
+    lastError: string | null;
+  } | null;
 }
 
 interface CampaignBatch {
@@ -111,6 +133,8 @@ export default function CampaignDetail() {
   const [isStarting, setIsStarting]       = useState(false);
   const [isPausing, setIsPausing]         = useState(false);
   const [isCancelling, setIsCancelling]   = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [diagnostics, setDiagnostics]     = useState<CampaignDiagnostics | null>(null);
 
   const cooldownLeft = useCooldownTimer(progress?.cooldownSeconds ?? 0);
 
@@ -179,6 +203,20 @@ export default function CampaignDetail() {
     } catch { /* silent */ }
   }, [campaignId]);
 
+  // ─── Fetch diagnostics ───────────────────────────────────────────────────────
+  const fetchDiagnostics = useCallback(async () => {
+    if (!campaignId) return;
+    try {
+      const token = localStorage.getItem("auth_token");
+      const res   = await fetch(`/api/campaigns/${campaignId}/diagnostics`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data: CampaignDiagnostics = await res.json();
+      setDiagnostics(data);
+    } catch { /* silent */ }
+  }, [campaignId]);
+
   // ─── Load mailbox delay setting ──────────────────────────────────────────────
   useEffect(() => {
     const token = localStorage.getItem("auth_token");
@@ -194,6 +232,11 @@ export default function CampaignDetail() {
     fetchProgress();
     fetchBatches();
   }, [campaignId, fetchProgress, fetchBatches]);
+
+  useEffect(() => {
+    if (!campaignId || !showDiagnostics) return;
+    fetchDiagnostics();
+  }, [campaignId, showDiagnostics, fetchDiagnostics]);
 
   // ─── Poll progress while job active ─────────────────────────────────────────
   useEffect(() => {
@@ -462,13 +505,14 @@ export default function CampaignDetail() {
         <StatCard
           label={isSmtp ? "Sent" : "Drafted"}
           value={progress?.sent ?? 0}
+          sub={(progress?.sending ?? 0) > 0 ? `${progress?.sending} sending now` : undefined}
           color="bg-emerald-50 border-emerald-100 text-emerald-800"
           icon={<CheckCircle2 className="h-4 w-4" />}
         />
         <StatCard
           label="Remaining"
-          value={progress?.remaining ?? 0}
-          sub={progress?.remaining && progress.remaining > 0 ? "unsent leads" : undefined}
+          value={(progress?.remaining ?? 0) + (progress?.queued ?? 0)}
+          sub={(progress?.queued ?? 0) > 0 ? `${progress?.queued} queued` : undefined}
           color="bg-blue-50 border-blue-100 text-blue-800"
           icon={<Clock className="h-4 w-4" />}
         />
@@ -711,8 +755,23 @@ export default function CampaignDetail() {
         </div>
       )}
 
+      {/* ─── Deferred warning banner ──────────────────────────────────────────── */}
+      {progress?.status === "paused" && !isActive && (progress?.queued ?? 0) > 0 && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-900">
+              {progress.queued} lead{progress.queued !== 1 ? "s" : ""} pending — some emails may be deferred
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              SMTP send failures are retried automatically. Resume the campaign to continue processing.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* ─── Done banner ──────────────────────────────────────────────────────── */}
-      {isDone && progress && progress.total > 0 && (
+      {isDone && progress && progress.total > 0 && (progress.sent > 0 || progress.failed > 0) && (
         <div className={`rounded-2xl border p-5 flex flex-col sm:flex-row sm:items-center gap-4 ${
           (progress.failed ?? 0) > 0
             ? "bg-amber-50 border-amber-200"
@@ -758,7 +817,7 @@ export default function CampaignDetail() {
             </div>
             <div className="flex-1">
               <p className="text-sm font-bold text-slate-900">Batch History</p>
-              <p className="text-xs text-slate-500">{batches.length} batch{batches.length !== 1 ? "es" : ""} sent</p>
+              <p className="text-xs text-slate-500">{batches.length} batch{batches.length !== 1 ? "es" : ""}</p>
             </div>
             {showBatches
               ? <ChevronUp className="h-4 w-4 text-slate-400" />
@@ -792,6 +851,11 @@ export default function CampaignDetail() {
                           <span className="text-xs text-slate-600">
                             Batch of <span className="font-semibold">{batch.batchSize}</span>
                           </span>
+                          {(batch.sentCount + batch.failedCount < batch.batchSize) && batch.batchSize > 0 && (
+                            <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700">
+                              In Progress
+                            </span>
+                          )}
                           {batch.sentCount > 0 && (
                             <span className="text-xs text-emerald-700 font-medium">
                               ✓ {batch.sentCount} sent
@@ -891,6 +955,7 @@ export default function CampaignDetail() {
                         const statusBadge: Record<string, string> = {
                           new:     "bg-slate-100 text-slate-600",
                           queued:  "bg-blue-100 text-blue-700",
+                          sending: "bg-indigo-100 text-indigo-700",
                           sent:    "bg-emerald-100 text-emerald-700",
                           drafted: "bg-violet-100 text-violet-700",
                           failed:  "bg-red-100 text-red-700",
@@ -1119,6 +1184,116 @@ export default function CampaignDetail() {
             </div>
           </div>
         )}
+
+        {/* ─── Diagnostics Panel ────────────────────────────────────────────────── */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <button
+            type="button"
+            onClick={() => { setShowDiagnostics(b => !b); if (!showDiagnostics) fetchDiagnostics(); }}
+            className="w-full px-5 py-4 flex items-center gap-3 hover:bg-slate-50 transition-colors text-left"
+          >
+            <div className="h-8 w-8 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
+              <Gauge className="h-4 w-4 text-slate-500" />
+            </div>
+            <div className="flex-1">
+              <p className="text-sm font-bold text-slate-900">Diagnostics</p>
+              <p className="text-xs text-slate-500">Raw campaign &amp; queue state</p>
+            </div>
+            {showDiagnostics
+              ? <ChevronUp className="h-4 w-4 text-slate-400" />
+              : <ChevronDown className="h-4 w-4 text-slate-400" />}
+          </button>
+          <AnimatePresence>
+            {showDiagnostics && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="overflow-hidden"
+              >
+                <div className="border-t border-slate-100 px-5 py-4 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-semibold text-slate-700">Campaign State</p>
+                    <button
+                      onClick={fetchDiagnostics}
+                      className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" /> Refresh
+                    </button>
+                  </div>
+
+                  {diagnostics ? (
+                    <>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+                        {[
+                          { label: "Campaign Status", value: diagnostics.status },
+                          { label: "Total Leads", value: diagnostics.totalLeads },
+                          { label: "Job Active", value: diagnostics.isJobActive ? "Yes" : "No" },
+                          { label: "sentCount (DB)", value: diagnostics.sentCount },
+                          { label: "failedCount (DB)", value: diagnostics.failedCount },
+                          { label: "Cooldown Until", value: diagnostics.cooldownUntil
+                            ? new Date(diagnostics.cooldownUntil).toLocaleTimeString()
+                            : "—" },
+                        ].map(r => (
+                          <div key={r.label} className="bg-slate-50 rounded-xl px-3 py-2">
+                            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">{r.label}</p>
+                            <p className="font-bold text-slate-800 mt-0.5">{String(r.value)}</p>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <p className="text-xs font-semibold text-slate-600 mb-2">Lead Status Counts</p>
+                          <div className="space-y-1">
+                            {Object.entries(diagnostics.leadCounts).map(([status, count]) => (
+                              <div key={status} className="flex items-center justify-between text-xs px-3 py-1.5 bg-slate-50 rounded-lg">
+                                <span className="capitalize text-slate-600">{status}</span>
+                                <span className="font-bold text-slate-800">{count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-slate-600 mb-2">Queue Status Counts</p>
+                          <div className="space-y-1">
+                            {Object.entries(diagnostics.queueCounts).map(([status, count]) => (
+                              <div key={status} className="flex items-center justify-between text-xs px-3 py-1.5 bg-slate-50 rounded-lg">
+                                <span className="capitalize text-slate-600">{status}</span>
+                                <span className="font-bold text-slate-800">{count}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      {diagnostics.nextDeferred && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-xs">
+                          <p className="font-semibold text-amber-900 mb-1">Next Deferred Item</p>
+                          <p className="text-amber-700">{diagnostics.nextDeferred.email}</p>
+                          <p className="text-amber-600 mt-0.5">
+                            Retries: {diagnostics.nextDeferred.deferredCount ?? 0} ·
+                            {diagnostics.nextDeferred.retryInSeconds != null
+                              ? ` Ready in ${formatSeconds(diagnostics.nextDeferred.retryInSeconds)}`
+                              : " Ready now"}
+                          </p>
+                          {diagnostics.nextDeferred.lastError && (
+                            <p className="text-amber-600 mt-0.5 truncate" title={diagnostics.nextDeferred.lastError}>
+                              Error: {diagnostics.nextDeferred.lastError}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-400">Loading diagnostics…</p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </div>
       </div>
     </div>
   );

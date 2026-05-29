@@ -129,6 +129,12 @@ export async function processCampaignJobQueue(
         .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs })
         .where(eq(emailQueueTable.id, item.id));
 
+      if (item.leadId) {
+        await db.update(leadsTable)
+          .set({ status: "sending", updatedAt: new Date() })
+          .where(eq(leadsTable.id, item.leadId));
+      }
+
       const delay = (box.delaySeconds ?? 15) * 1000;
       await sleep(delay);
 
@@ -245,20 +251,27 @@ export async function processCampaignJobQueue(
     await db.update(campaignBatchesTable).set({ sentCount: batchSent, failedCount: batchFailed })
       .where(eq(campaignBatchesTable.jobId, jobId));
 
-    // Determine final campaign status
-    const [remaining] = await db.select({ count: sql<number>`count(*)::int` })
-      .from(leadsTable)
-      .where(and(eq(leadsTable.campaignId, campaignId), eq(leadsTable.status, "new")));
-    const [queued] = await db.select({ count: sql<number>`count(*)::int` })
-      .from(leadsTable)
-      .where(and(eq(leadsTable.campaignId, campaignId), eq(leadsTable.status, "queued")));
+    // Determine final campaign status using terminal lead counts (sent+drafted+failed === totalLeads)
+    const [campFinal] = await db.select({ status: campaignsTable.status, totalLeads: campaignsTable.totalLeads })
+      .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
 
-    if ((remaining?.count ?? 0) === 0 && (queued?.count ?? 0) === 0) {
-      await db.update(campaignsTable).set({ status: "completed", updatedAt: new Date() })
-        .where(eq(campaignsTable.id, campaignId));
-    } else {
-      await db.update(campaignsTable).set({ status: "paused", updatedAt: new Date() })
-        .where(eq(campaignsTable.id, campaignId));
+    if (campFinal && campFinal.status !== "cancelled") {
+      const total = campFinal.totalLeads ?? 0;
+      const [termRow] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(leadsTable)
+        .where(and(
+          eq(leadsTable.campaignId, campaignId),
+          inArray(leadsTable.status, ["sent", "drafted", "failed"])
+        ));
+      const termCount = termRow?.count ?? 0;
+
+      if (total > 0 && termCount >= total) {
+        await db.update(campaignsTable).set({ status: "completed", updatedAt: new Date() })
+          .where(eq(campaignsTable.id, campaignId));
+      } else {
+        await db.update(campaignsTable).set({ status: "paused", updatedAt: new Date() })
+          .where(eq(campaignsTable.id, campaignId));
+      }
     }
   }
 }
@@ -344,6 +357,12 @@ export async function processCampaignFully(
         .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs2 })
         .where(eq(emailQueueTable.id, item.id));
 
+      if (item.leadId) {
+        await db.update(leadsTable)
+          .set({ status: "sending", updatedAt: new Date() })
+          .where(eq(leadsTable.id, item.leadId));
+      }
+
       const delay = (box.delaySeconds ?? 15) * 1000;
       await sleep(delay);
 
@@ -352,6 +371,11 @@ export async function processCampaignFully(
         .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
       if (!campAfter || campAfter.status === "paused" || campAfter.status === "cancelled") {
         await db.update(emailQueueTable).set({ status: "pending" }).where(eq(emailQueueTable.id, item.id));
+        if (item.leadId) {
+          await db.update(leadsTable)
+            .set({ status: "queued", updatedAt: new Date() })
+            .where(eq(leadsTable.id, item.leadId));
+        }
         break;
       }
 
@@ -455,15 +479,26 @@ export async function processCampaignFully(
   } finally {
     activeJobs.delete(key);
 
-    const [camp] = await db.select({ status: campaignsTable.status })
+    const [camp] = await db.select({ status: campaignsTable.status, totalLeads: campaignsTable.totalLeads })
       .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
 
-    if (camp && camp.status !== "paused" && camp.status !== "cancelled") {
-      const [pendingQ] = await db.select({ count: sql<number>`count(*)::int` })
-        .from(emailQueueTable)
-        .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, "pending")));
-      if ((pendingQ?.count ?? 0) === 0) {
+    if (camp && camp.status !== "paused" && camp.status !== "cancelled" && camp.status !== "cooling_down") {
+      const total = camp.totalLeads ?? 0;
+      const [termRow] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(leadsTable)
+        .where(and(
+          eq(leadsTable.campaignId, campaignId),
+          inArray(leadsTable.status, ["sent", "drafted", "failed"])
+        ));
+      const termCount = termRow?.count ?? 0;
+
+      if (total > 0 && termCount >= total) {
+        // Every lead has reached a terminal state — campaign is truly complete
         await db.update(campaignsTable).set({ status: "completed", updatedAt: new Date() })
+          .where(eq(campaignsTable.id, campaignId));
+      } else {
+        // Deferred/pending items remain or not all leads terminal — pause for retry
+        await db.update(campaignsTable).set({ status: "paused", updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
       }
     }
@@ -609,7 +644,7 @@ router.get("/campaigns/:id/progress", requireAuth, async (req, res): Promise<voi
   if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
 
   // Count leads by status
-  const statuses = ["new", "queued", "sent", "drafted", "failed"] as const;
+  const statuses = ["new", "queued", "sending", "sent", "drafted", "failed"] as const;
   const counts: Record<string, number> = {};
   for (const s of statuses) {
     const [row] = await db.select({ count: sql<number>`count(*)::int` })
@@ -618,10 +653,11 @@ router.get("/campaigns/:id/progress", requireAuth, async (req, res): Promise<voi
     counts[s] = row?.count ?? 0;
   }
 
-  const total    = campaign.totalLeads;
-  const sent     = (counts.sent ?? 0) + (counts.drafted ?? 0);
-  const queued   = counts.queued ?? 0;
-  const failed   = counts.failed ?? 0;
+  const total     = campaign.totalLeads;
+  const sent      = (counts.sent ?? 0) + (counts.drafted ?? 0);
+  const sending   = counts.sending ?? 0;
+  const queued    = counts.queued ?? 0;
+  const failed    = counts.failed ?? 0;
   const remaining = counts.new ?? 0;
 
   // Hourly rate info (for SMTP mode)
@@ -673,7 +709,7 @@ router.get("/campaigns/:id/progress", requireAuth, async (req, res): Promise<voi
   }
 
   res.json({
-    total, sent, queued, failed, remaining,
+    total, sent, sending, queued, failed, remaining,
     sentThisHour, hourlyLimit, remainingQuota,
     isHourlyLimitReached, cooldownSeconds,
     currentJobId: campaign.currentJobId ?? null,
@@ -1132,6 +1168,73 @@ router.get("/campaigns/:id/batches", requireAuth, async (req, res): Promise<void
     .orderBy(desc(campaignBatchesTable.createdAt));
 
   res.json({ data: batches.map(b => ({ ...b, createdAt: b.createdAt.toISOString() })) });
+});
+
+// ─── GET /api/campaigns/:id/diagnostics ──────────────────────────────────────
+router.get("/campaigns/:id/diagnostics", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  const [campaign] = await db.select().from(campaignsTable)
+    .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+  if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+  const leadStatuses = ["new", "queued", "sending", "sent", "drafted", "failed"] as const;
+  const leadCounts: Record<string, number> = {};
+  for (const s of leadStatuses) {
+    const [row] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(leadsTable)
+      .where(and(eq(leadsTable.campaignId, campaignId), eq(leadsTable.status, s)));
+    leadCounts[s] = row?.count ?? 0;
+  }
+
+  const queueStatuses = ["pending", "sending", "success", "failed", "deferred"] as const;
+  const queueCounts: Record<string, number> = {};
+  for (const s of queueStatuses) {
+    const [row] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(emailQueueTable)
+      .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, s)));
+    queueCounts[s] = row?.count ?? 0;
+  }
+
+  const [nextDeferred] = await db.select({
+    id: emailQueueTable.id,
+    email: emailQueueTable.email,
+    retryAfter: emailQueueTable.retryAfter,
+    deferredCount: emailQueueTable.deferredCount,
+    lastError: emailQueueTable.lastError,
+  }).from(emailQueueTable)
+    .where(and(
+      eq(emailQueueTable.campaignId, campaignId),
+      eq(emailQueueTable.status, "deferred"),
+    ))
+    .orderBy(emailQueueTable.retryAfter)
+    .limit(1);
+
+  const campaignKey = `campaign:${campaignId}`;
+  const legacyKey   = campaign.currentJobId ?? "";
+  const isJobActive = activeJobs.has(campaignKey) || activeJobs.has(legacyKey);
+
+  res.json({
+    campaignId,
+    status: campaign.status,
+    totalLeads: campaign.totalLeads,
+    sentCount: campaign.sentCount,
+    failedCount: campaign.failedCount,
+    isJobActive,
+    currentJobId: campaign.currentJobId ?? null,
+    cooldownUntil: campaign.cooldownUntil?.toISOString() ?? null,
+    leadCounts,
+    queueCounts,
+    nextDeferred: nextDeferred ? {
+      ...nextDeferred,
+      retryAfter: nextDeferred.retryAfter?.toISOString() ?? null,
+      retryInSeconds: nextDeferred.retryAfter
+        ? Math.max(0, Math.ceil((nextDeferred.retryAfter.getTime() - Date.now()) / 1000))
+        : null,
+    } : null,
+  });
 });
 
 // ─── PATCH /api/campaigns/:id ─────────────────────────────────────────────────
