@@ -33,13 +33,15 @@ function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 function sendEmailWithTimeout(
   box: typeof mailboxesTable.$inferSelect,
   opts: Parameters<typeof sendEmail>[1],
-  timeoutMs = 30_000,
+  // 90s: connectionTimeout(20) + greetingTimeout(30) + socketTimeout(60) with buffer.
+  // Must be > nodemailer's own timeouts so nodemailer always fires its error first.
+  timeoutMs = 90_000,
 ): ReturnType<typeof sendEmail> {
   return Promise.race([
     sendEmail(box, opts),
     new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`SMTP send timed out after ${timeoutMs / 1000}s — check SMTP host connectivity`)),
+        () => reject(new Error(`SMTP send timed out after ${timeoutMs / 1000}s — nodemailer did not resolve/reject`)),
         timeoutMs,
       )
     ),
@@ -94,18 +96,35 @@ export async function processCampaignJobQueue(
   activeJobs.set(jobId, true);
   logger.info({ jobId, campaignId, mailbox: box.smtpUser }, "[QUEUE] 1. Campaign processor started");
 
-  // Recover items stuck in 'sending' from a previous interrupted run
-  const stuckItems = await db
+  // Pass 1: Recover queue items stuck in 'sending' → reset to 'pending' + leads to 'queued'
+  const stuckSendingItems = await db
     .update(emailQueueTable)
     .set({ status: "pending" })
     .where(and(eq(emailQueueTable.jobId, jobId), eq(emailQueueTable.status, "sending")))
     .returning({ id: emailQueueTable.id, leadId: emailQueueTable.leadId });
-  if (stuckItems.length > 0) {
-    logger.warn({ jobId, campaignId, count: stuckItems.length }, "[QUEUE] Recovered stuck 'sending' items → reset to pending");
-    const stuckLeadIds = stuckItems.map(i => i.leadId).filter((id): id is number => id != null);
-    if (stuckLeadIds.length > 0) {
+  if (stuckSendingItems.length > 0) {
+    logger.warn({ jobId, campaignId, count: stuckSendingItems.length }, "[QUEUE] Recovered stuck 'sending' queue items → reset to pending");
+    const ids = stuckSendingItems.map(i => i.leadId).filter((id): id is number => id != null);
+    if (ids.length > 0) {
       await db.update(leadsTable).set({ status: "queued", updatedAt: new Date() })
-        .where(inArray(leadsTable.id, stuckLeadIds));
+        .where(inArray(leadsTable.id, ids));
+    }
+  }
+
+  // Pass 2: Recover leads stuck in 'sending' when their queue item is already 'deferred'
+  // (happens when the previous run failed and deferred the queue item but never reset the lead)
+  const deferredItems = await db
+    .select({ leadId: emailQueueTable.leadId })
+    .from(emailQueueTable)
+    .where(and(eq(emailQueueTable.jobId, jobId), eq(emailQueueTable.status, "deferred"), isNotNull(emailQueueTable.leadId)));
+  if (deferredItems.length > 0) {
+    const deferredLeadIds = deferredItems.map(i => i.leadId).filter((id): id is number => id != null);
+    const fixed = await db.update(leadsTable)
+      .set({ status: "queued", updatedAt: new Date() })
+      .where(and(inArray(leadsTable.id, deferredLeadIds), eq(leadsTable.status, "sending")))
+      .returning({ id: leadsTable.id });
+    if (fixed.length > 0) {
+      logger.warn({ jobId, campaignId, count: fixed.length }, "[QUEUE] Recovered leads stuck in 'sending' with deferred queue item → reset to queued");
     }
   }
 
@@ -256,6 +275,11 @@ export async function processCampaignJobQueue(
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
+          if (item.leadId) {
+            await db.update(leadsTable)
+              .set({ status: "queued", updatedAt: new Date() })
+              .where(eq(leadsTable.id, item.leadId));
+          }
           logger.warn({ jobId, campaignId, queueItemId: item.id }, "[QUEUE] Provider rate limit — deferring and stopping batch");
           break;
         } else if (attempts >= 3) {
@@ -278,7 +302,12 @@ export async function processCampaignJobQueue(
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
-          logger.info({ jobId, campaignId, queueItemId: item.id, retryAfter }, "[QUEUE] Queue item deferred for retry");
+          if (item.leadId) {
+            await db.update(leadsTable)
+              .set({ status: "queued", updatedAt: new Date() })
+              .where(eq(leadsTable.id, item.leadId));
+          }
+          logger.info({ jobId, campaignId, queueItemId: item.id, retryAfter }, "[QUEUE] Queue item deferred for retry — lead reset to queued");
         }
       }
     }
@@ -347,8 +376,8 @@ export async function processCampaignFully(
   activeJobs.set(key, true);
   logger.info({ campaignId, mailbox: box.smtpUser }, "[CAMPAIGN] 1. Campaign processor started");
 
-  // Recover items stuck in 'sending' from a previous interrupted run
-  const stuckItems = await db
+  // Pass 1: Recover queue items stuck in 'sending' → reset to 'pending' + leads to 'queued'
+  const stuckSendingQueue = await db
     .update(emailQueueTable)
     .set({ status: "pending" })
     .where(and(
@@ -356,13 +385,30 @@ export async function processCampaignFully(
       eq(emailQueueTable.status, "sending"),
     ))
     .returning({ id: emailQueueTable.id, leadId: emailQueueTable.leadId });
-  if (stuckItems.length > 0) {
-    logger.warn({ campaignId, count: stuckItems.length }, "[CAMPAIGN] Recovered stuck 'sending' queue items → reset to pending");
-    const stuckLeadIds = stuckItems.map(i => i.leadId).filter((id): id is number => id != null);
-    if (stuckLeadIds.length > 0) {
+  if (stuckSendingQueue.length > 0) {
+    logger.warn({ campaignId, count: stuckSendingQueue.length }, "[CAMPAIGN] Recovered stuck 'sending' queue items → reset to pending");
+    const ids = stuckSendingQueue.map(i => i.leadId).filter((id): id is number => id != null);
+    if (ids.length > 0) {
       await db.update(leadsTable)
         .set({ status: "queued", updatedAt: new Date() })
-        .where(inArray(leadsTable.id, stuckLeadIds));
+        .where(inArray(leadsTable.id, ids));
+    }
+  }
+
+  // Pass 2: Recover leads stuck in 'sending' when their queue item is already 'deferred'
+  // (happens when a previous run failed, deferred the queue item, but never reset the lead)
+  const deferredQItems = await db
+    .select({ leadId: emailQueueTable.leadId })
+    .from(emailQueueTable)
+    .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, "deferred"), isNotNull(emailQueueTable.leadId)));
+  if (deferredQItems.length > 0) {
+    const deferredLeadIds = deferredQItems.map(i => i.leadId).filter((id): id is number => id != null);
+    const fixed = await db.update(leadsTable)
+      .set({ status: "queued", updatedAt: new Date() })
+      .where(and(inArray(leadsTable.id, deferredLeadIds), eq(leadsTable.status, "sending")))
+      .returning({ id: leadsTable.id });
+    if (fixed.length > 0) {
+      logger.warn({ campaignId, count: fixed.length }, "[CAMPAIGN] Recovered leads stuck in 'sending' with deferred queue item → reset to queued");
     }
   }
 
@@ -544,6 +590,11 @@ export async function processCampaignFully(
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
+          if (item.leadId) {
+            await db.update(leadsTable)
+              .set({ status: "queued", updatedAt: new Date() })
+              .where(eq(leadsTable.id, item.leadId));
+          }
           await db.update(campaignsTable).set({
             status: "cooling_down", cooldownUntil: retryAfter, updatedAt: new Date(),
           }).where(eq(campaignsTable.id, campaignId));
@@ -568,7 +619,12 @@ export async function processCampaignFully(
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
-          logger.info({ campaignId, queueItemId: item.id, retryAfter }, "[CAMPAIGN] Queue item deferred for retry");
+          if (item.leadId) {
+            await db.update(leadsTable)
+              .set({ status: "queued", updatedAt: new Date() })
+              .where(eq(leadsTable.id, item.leadId));
+          }
+          logger.info({ campaignId, queueItemId: item.id, retryAfter }, "[CAMPAIGN] Queue item deferred for retry — lead reset to queued");
         }
       }
     }
