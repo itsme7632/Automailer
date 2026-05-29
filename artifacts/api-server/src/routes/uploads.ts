@@ -16,9 +16,7 @@ function nh(s: string): string {
 function isValidVehicle(val: string): boolean {
   const trimmed = val.trim();
   if (!trimmed) return false;
-  // Reject purely numeric (possibly with $ , .) — these are prices, not vehicles
   if (/^\$?[\d,]+\.?\d*$/.test(trimmed)) return false;
-  // Must contain at least one letter
   return /[a-zA-Z]/.test(trimmed);
 }
 
@@ -26,7 +24,10 @@ function looksLikePrice(val: string): boolean {
   return /^\$?[\d,]+\.?\d*$/.test(val.trim());
 }
 
-/** Map a normalized header to a standard field name, or null if not recognised. */
+/** Map a normalized header to a standard field name, or null if not recognised.
+ *  IMPORTANT: quote_id is checked BEFORE price so that columns named "quote",
+ *  "quote number", "id", etc. are never accidentally captured as {price}.
+ */
 function detectField(header: string): string | null {
   const n = nh(header);
 
@@ -39,11 +40,28 @@ function detectField(header: string): string | null {
        "firstname", "customer", "client", "leadname"].includes(n)) return "name";
   if (n.startsWith("custname") || n.endsWith("name")) return "name";
 
-  // ── Price ──────────────────────────────────────────────────────────────────
-  if (["totaltariff", "totalquote", "quote", "price", "amount", "total",
-       "transportcost", "shippingcost", "shippingrate", "rate", "cost",
-       "bid", "offer", "fee", "tariff", "transportprice", "transportrate",
-       "totalamount", "invoiceamount"].includes(n)) return "price";
+  // ── Quote ID (MUST come before price — "quote" alone maps here, not to price) ──
+  if ([
+    "quoteid", "quote_id", "quotenumber", "quotenum", "quoten", "quoteno",
+    "quote",                      // plain "Quote" column → {quote_id}
+    "quoteref", "quotereference",
+    "ordernumber", "orderid", "orderno",
+    "bookingid", "bookingno", "bookingnumber",
+    "referenceid", "refno", "refnumber", "reference",
+    "id", "number",               // generic ID/Number column → {quote_id}
+    "jobid", "jobnumber", "jobnо",
+    "qid", "qno",
+  ].includes(n)) return "quote_id";
+
+  // ── Price (note: "quote" and "totalquote" removed — they belong to quote_id above) ──
+  if ([
+    "totaltariff", "price", "amount", "total",
+    "transportcost", "shippingcost", "shippingrate", "rate", "cost",
+    "bid", "offer", "fee", "tariff",
+    "transportprice", "transportrate", "shippingprice",
+    "quoteprice", "quoteamount",   // "quote price" / "quote amount" → still price
+    "totalamount", "invoiceamount",
+  ].includes(n)) return "price";
 
   // ── Vehicle ────────────────────────────────────────────────────────────────
   if (["vehicle", "vehicles", "car", "vehicletype", "makemodel", "ymm",
@@ -51,12 +69,12 @@ function detectField(header: string): string | null {
        "vehicledescription", "transportvehicle"].includes(n)) return "vehicle";
   if (n.includes("vehicle") || n.includes("makemodel")) return "vehicle";
 
-  // ── Pickup (city-level single-column) ──────────────────────────────────────
+  // ── Pickup ─────────────────────────────────────────────────────────────────
   if (["pickup", "origin", "pickuplocation", "originlocation", "from",
        "fromlocation", "shippingfrom", "shipfrom", "pickupaddress",
        "originaddress", "shipper"].includes(n)) return "pickup";
 
-  // ── Delivery (city-level single-column) ────────────────────────────────────
+  // ── Delivery ───────────────────────────────────────────────────────────────
   if (["delivery", "destination", "deliverylocation", "destinationlocation", "to",
        "tolocation", "shippingto", "shipto", "deliveryaddress",
        "destinationaddress", "consignee"].includes(n)) return "delivery";
@@ -76,16 +94,12 @@ function detectField(header: string): string | null {
   if (["notes", "note", "comments", "comment", "remarks", "details",
        "additionalinfo", "extra", "description", "instructions"].includes(n)) return "notes";
 
-  // ── Quote ID ───────────────────────────────────────────────────────────────
-  if (["quoteid", "quote_id", "quotenumber", "quotenum", "quoten",
-       "quoteref", "quotereference", "ordernumber", "orderid"].includes(n)) return "quote_id";
-
   return null;
 }
 
 /**
- * Try to build a compound "City, ST ZIP" location string from sub-columns
- * when the main location column was not found.
+ * Build a compound "City, ST ZIP" location from sub-columns when the main
+ * location column was not found.
  */
 function buildCompoundLocation(
   row: Record<string, string>,
@@ -104,9 +118,7 @@ function buildCompoundLocation(
     ? ["originzip", "pickupzip", "originzipcode", "pickupzipcode", "fromzip"]
     : ["destinationzip", "deliveryzip", "destinationzipcode", "deliveryzipcode", "tozip"];
 
-  let city = "";
-  let state = "";
-  let zip = "";
+  let city = ""; let state = ""; let zip = "";
 
   for (const h of headers) {
     const n = nh(h);
@@ -118,7 +130,6 @@ function buildCompoundLocation(
   }
 
   if (!city && !state) return null;
-
   const parts: string[] = [];
   if (city) parts.push(city);
   const stateZip = [state, zip].filter(Boolean).join(" ");
@@ -152,8 +163,17 @@ function mapRow(
     // Strict vehicle validation — numeric values must never become {vehicle}
     if (field === "vehicle" && !isValidVehicle(val)) continue;
 
-    // If a non-price field gets a numeric value, offer it to price instead
-    if (field !== "price" && field !== "email" && field !== "phone" && field !== "name" && looksLikePrice(val)) {
+    // If a non-price/non-id field gets a numeric value, offer it to price instead.
+    // IMPORTANT: quote_id is explicitly excluded — numeric quote IDs must NEVER be
+    // silently redirected to {price}.
+    if (
+      field !== "price" &&
+      field !== "quote_id" &&   // ← key fix: protect quote_id from theft
+      field !== "email" &&
+      field !== "phone" &&
+      field !== "name" &&
+      looksLikePrice(val)
+    ) {
       if (!mapped["price"]) mapped["price"] = val;
       continue;
     }
@@ -162,12 +182,8 @@ function mapRow(
   }
 
   // Attempt compound location building when single-column detection missed
-  if (!mapped.pickup) {
-    mapped.pickup = buildCompoundLocation(row, headers, "pickup");
-  }
-  if (!mapped.delivery) {
-    mapped.delivery = buildCompoundLocation(row, headers, "delivery");
-  }
+  if (!mapped.pickup)   mapped.pickup   = buildCompoundLocation(row, headers, "pickup");
+  if (!mapped.delivery) mapped.delivery = buildCompoundLocation(row, headers, "delivery");
 
   return mapped;
 }
@@ -229,17 +245,24 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
     return { ...rawFields, ...mapped, hasValidEmail, isDuplicate };
   });
 
-  const validRows    = parsedRows.filter(r => r.hasValidEmail && !r.isDuplicate).length;
-  const invalidRows  = parsedRows.filter(r => !r.hasValidEmail).length;
+  const validRows     = parsedRows.filter(r => r.hasValidEmail && !r.isDuplicate).length;
+  const invalidRows   = parsedRows.filter(r => !r.hasValidEmail).length;
   const duplicateRows = parsedRows.filter(r => r.isDuplicate).length;
 
-  // Report which standard fields were successfully auto-detected
+  // Report which standard fields were auto-detected
   const STANDARD_FIELDS = ["name","email","vehicle","pickup","delivery","price","route","company","phone","notes","quote_id"];
   const firstRow = (parsedRows[0] ?? {}) as Record<string, unknown>;
   const detectedFields = STANDARD_FIELDS.filter(k => {
     const v = firstRow[k];
     return v != null && v !== false && v !== "";
   });
+
+  // Build column-to-variable mapping so the frontend can show a debug panel
+  // and allow manual override before sending.
+  const columnMappings: Record<string, string | null> = {};
+  for (const header of headers) {
+    columnMappings[header] = detectField(header);
+  }
 
   res.json({
     rows: parsedRows,
@@ -249,6 +272,7 @@ router.post("/uploads/parse", requireAuth, upload.single("file"), async (req, re
     duplicateRows,
     detectedFields,
     headers,
+    columnMappings,
   });
 });
 

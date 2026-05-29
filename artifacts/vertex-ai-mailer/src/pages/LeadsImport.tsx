@@ -11,9 +11,12 @@ import {
   AlertCircle, FileText, RefreshCw, PenLine, Server,
   Mail, ArrowRight, Sparkles, Eye, ChevronLeft, ChevronRight,
   User, AtSign, Car, MapPin, Hash, Clock, Layers, Zap,
+  SlidersHorizontal, RotateCcw, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
 
 interface ParsedRow {
   email?: string | null;
@@ -26,6 +29,7 @@ interface ParsedRow {
   company?: string | null;
   phone?: string | null;
   notes?: string | null;
+  quote_id?: string | null;
   hasValidEmail: boolean;
   isDuplicate: boolean;
   [key: string]: string | boolean | null | undefined;
@@ -39,10 +43,13 @@ interface ParseResult {
   duplicateRows: number;
   detectedFields: string[];
   headers: string[];
+  columnMappings: Record<string, string | null>;
 }
 
 type EmailStyle = "clean" | "modern" | "minimal" | "luxury" | "corporate" | "urgent" | "dispatch" | "friendly" | "mobile" | "dark";
 type SendMode   = "gmail" | "smtp";
+
+// ─── Constants ─────────────────────────────────────────────────────────────────
 
 const EMAIL_STYLES: { value: EmailStyle; label: string; desc: string; bg: string }[] = [
   { value: "clean",     label: "Clean",           desc: "Blue header",         bg: "#1d4ed8" },
@@ -57,6 +64,26 @@ const EMAIL_STYLES: { value: EmailStyle; label: string; desc: string; bg: string
   { value: "dark",      label: "Dark Mode",        desc: "Dark navy, modern",   bg: "#1e293b" },
 ];
 
+const STANDARD_VARIABLES: { value: string; label: string }[] = [
+  { value: "name",     label: "{name} — Customer Name" },
+  { value: "email",    label: "{email} — Email" },
+  { value: "vehicle",  label: "{vehicle} — Vehicle" },
+  { value: "pickup",   label: "{pickup} — Pickup Location" },
+  { value: "delivery", label: "{delivery} — Delivery Location" },
+  { value: "price",    label: "{price} — Price / Tariff" },
+  { value: "quote_id", label: "{quote_id} — Quote ID / Number" },
+  { value: "company",  label: "{company} — Company" },
+  { value: "phone",    label: "{phone} — Phone" },
+  { value: "notes",    label: "{notes} — Notes" },
+  { value: "route",    label: "{route} — Route" },
+];
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
+function normalizeKey(h: string): string {
+  return h.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+}
+
 function rowToRecord(row: ParsedRow): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(row)) {
@@ -64,6 +91,184 @@ function rowToRecord(row: ParsedRow): Record<string, string> {
     if (typeof v === "string" && v) out[k] = v;
   }
   return out;
+}
+
+/**
+ * Re-apply column→variable mappings (server detections + user overrides) to
+ * the raw rows so preview and campaign use the correct field assignments.
+ */
+function applyOverridesToRows(
+  serverRows: ParsedRow[],
+  headers: string[],
+  serverMappings: Record<string, string | null>,
+  userOverrides: Record<string, string | null>,
+): ParsedRow[] {
+  if (Object.keys(userOverrides).length === 0) return serverRows;
+
+  const effective: Record<string, string | null> = { ...serverMappings, ...userOverrides };
+
+  return serverRows.map(row => {
+    const newRow: ParsedRow = { hasValidEmail: row.hasValidEmail, isDuplicate: row.isDuplicate };
+
+    // Copy raw column data (normalised keys, already present in server row)
+    for (const h of headers) {
+      const k = normalizeKey(h);
+      const v = row[k];
+      if (v != null && v !== false && v !== undefined) newRow[k] = v as string;
+    }
+
+    // Apply effective mappings — first-win per variable
+    for (const h of headers) {
+      const variable = effective[h];
+      if (!variable) continue;
+      const rawKey = normalizeKey(h);
+      const val = row[rawKey] as string | undefined;
+      if (val && !newRow[variable]) newRow[variable] = val;
+    }
+
+    return newRow;
+  });
+}
+
+// ─── Variable Mapping Panel ────────────────────────────────────────────────────
+
+function VariableMappingPanel({
+  headers,
+  columnMappings,
+  userOverrides,
+  onOverride,
+  onResetAll,
+}: {
+  headers: string[];
+  columnMappings: Record<string, string | null>;
+  userOverrides: Record<string, string | null>;
+  onOverride: (header: string, variable: string | null) => void;
+  onResetAll: () => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const hasOverrides = Object.keys(userOverrides).length > 0;
+
+  // Count correctly auto-mapped vs unmapped
+  const mappedCount   = headers.filter(h => (userOverrides[h] !== undefined ? userOverrides[h] : columnMappings[h]) !== null).length;
+  const unmappedCount = headers.length - mappedCount;
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      {/* Header */}
+      <button
+        className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-slate-50 transition-colors"
+        onClick={() => setCollapsed(c => !c)}
+      >
+        <div className="flex items-center gap-2.5">
+          <SlidersHorizontal className="h-4 w-4 text-slate-400" />
+          <span className="text-sm font-semibold text-slate-800">Detected Spreadsheet Variables</span>
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100 text-xs text-emerald-700">
+            <CheckCircle2 className="h-2.5 w-2.5" />{mappedCount} mapped
+          </span>
+          {unmappedCount > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-xs text-slate-500">
+              {unmappedCount} unmapped
+            </span>
+          )}
+          {hasOverrides && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-xs text-amber-700">
+              {Object.keys(userOverrides).length} overridden
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {hasOverrides && (
+            <button
+              onClick={e => { e.stopPropagation(); onResetAll(); }}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors"
+            >
+              <RotateCcw className="h-3 w-3" /> Reset
+            </button>
+          )}
+          {collapsed
+            ? <ChevronDown className="h-4 w-4 text-slate-400" />
+            : <ChevronUp   className="h-4 w-4 text-slate-400" />}
+        </div>
+      </button>
+
+      {/* Body */}
+      {!collapsed && (
+        <div className="px-5 pb-4 space-y-1.5">
+          <p className="text-xs text-slate-400 mb-3">
+            Verify auto-detected mappings below. Use the dropdown to correct any wrong assignment before creating the campaign.
+          </p>
+
+          {/* Column headers */}
+          <div className="grid grid-cols-[1fr,auto,180px] gap-x-3 items-center px-2 mb-1">
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">CSV Column</span>
+            <span />
+            <span className="text-xs font-semibold text-slate-400 uppercase tracking-wide">Maps to variable</span>
+          </div>
+
+          <div className="space-y-1">
+            {headers.map(header => {
+              const serverDetected = columnMappings[header];
+              const overrideVal    = userOverrides[header];
+              const effective      = overrideVal !== undefined ? overrideVal : serverDetected;
+              const isOverridden   = overrideVal !== undefined;
+
+              return (
+                <div
+                  key={header}
+                  className={`grid grid-cols-[1fr,auto,180px] gap-x-3 items-center px-2 py-1.5 rounded-lg transition-colors ${
+                    isOverridden ? "bg-amber-50 border border-amber-100" :
+                    effective    ? "bg-slate-50" : "bg-white"
+                  }`}
+                >
+                  {/* CSV column name */}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {effective
+                      ? <CheckCircle2 className="h-3 w-3 text-emerald-500 flex-shrink-0" />
+                      : <span className="h-3 w-3 rounded-full border border-slate-300 flex-shrink-0 inline-block" />
+                    }
+                    <span className="text-xs font-mono text-slate-700 truncate">{header}</span>
+                    {isOverridden && (
+                      <span className="text-xs text-amber-600 flex-shrink-0">(edited)</span>
+                    )}
+                  </div>
+
+                  {/* Arrow */}
+                  <ArrowRight className="h-3 w-3 text-slate-300 flex-shrink-0" />
+
+                  {/* Variable selector */}
+                  <Select
+                    value={effective ?? "__none__"}
+                    onValueChange={v => onOverride(header, v === "__none__" ? null : v)}
+                  >
+                    <SelectTrigger
+                      className={`h-7 text-xs rounded-lg ${
+                        isOverridden
+                          ? "border-amber-400 bg-amber-50 text-amber-800"
+                          : effective
+                          ? "border-emerald-200 bg-white text-slate-700"
+                          : "border-slate-200 bg-white text-slate-400"
+                      }`}
+                    >
+                      <SelectValue placeholder="(unmapped)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__" className="text-slate-400 italic">(ignore / unmapped)</SelectItem>
+                      {STANDARD_VARIABLES.map(v => (
+                        <SelectItem key={v.value} value={v.value} className="text-xs">
+                          {v.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Email Preview Modal ───────────────────────────────────────────────────────
@@ -79,11 +284,11 @@ function EmailPreviewModal({
   emailStyle: EmailStyle;
   useSignatureBuilder: boolean;
 }) {
-  const [index, setIndex] = useState(0);
-  const [html, setHtml]   = useState<string | null>(null);
+  const [index, setIndex]     = useState(0);
+  const [html, setHtml]       = useState<string | null>(null);
   const [subject, setSubject] = useState<string>("");
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState<string | null>(null);
+  const [error, setError]     = useState<string | null>(null);
 
   const current = rows[index];
   const total   = rows.length;
@@ -114,13 +319,8 @@ function EmailPreviewModal({
     }
   }, [rows, templateId, emailStyle, useSignatureBuilder]);
 
-  useEffect(() => {
-    if (open) { setIndex(0); fetchPreview(0); }
-  }, [open]);
-
-  useEffect(() => {
-    if (open) fetchPreview(index);
-  }, [index]);
+  useEffect(() => { if (open) { setIndex(0); fetchPreview(0); } }, [open]);
+  useEffect(() => { if (open) fetchPreview(index); }, [index]);
 
   function prev() { if (index > 0) setIndex(i => i - 1); }
   function next() { if (index < total - 1) setIndex(i => i + 1); }
@@ -134,26 +334,14 @@ function EmailPreviewModal({
               <DialogTitle className="text-sm font-semibold text-slate-900 truncate">
                 {loading ? <Skeleton className="h-4 w-48 inline-block" /> : subject || "Email Preview"}
               </DialogTitle>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Preview {index + 1} of {total} leads
-              </p>
+              <p className="text-xs text-slate-500 mt-0.5">Preview {index + 1} of {total} leads</p>
             </div>
             <div className="flex items-center gap-1.5 flex-shrink-0">
-              <Button
-                variant="outline" size="sm"
-                onClick={prev} disabled={index === 0}
-                className="h-8 w-8 p-0 rounded-lg"
-              >
+              <Button variant="outline" size="sm" onClick={prev} disabled={index === 0} className="h-8 w-8 p-0 rounded-lg">
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <span className="text-xs font-mono text-slate-500 w-14 text-center">
-                {index + 1} / {total}
-              </span>
-              <Button
-                variant="outline" size="sm"
-                onClick={next} disabled={index >= total - 1}
-                className="h-8 w-8 p-0 rounded-lg"
-              >
+              <span className="text-xs font-mono text-slate-500 w-14 text-center">{index + 1} / {total}</span>
+              <Button variant="outline" size="sm" onClick={next} disabled={index >= total - 1} className="h-8 w-8 p-0 rounded-lg">
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
@@ -161,7 +349,7 @@ function EmailPreviewModal({
         </DialogHeader>
 
         <div className="flex flex-1 overflow-hidden min-h-0">
-          {/* Email preview */}
+          {/* Email preview iframe */}
           <div className="flex-1 overflow-auto bg-slate-50 min-w-0">
             {loading && (
               <div className="p-6 space-y-3">
@@ -175,27 +363,18 @@ function EmailPreviewModal({
               <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-400">
                 <AlertCircle className="h-8 w-8 text-slate-300" />
                 <p className="text-sm">{error}</p>
-                <Button variant="outline" size="sm" onClick={() => fetchPreview(index)} className="rounded-lg mt-1">
-                  Retry
-                </Button>
+                <Button variant="outline" size="sm" onClick={() => fetchPreview(index)} className="rounded-lg mt-1">Retry</Button>
               </div>
             )}
             {html && !loading && (
-              <iframe
-                srcDoc={html}
-                className="w-full h-full border-0 min-h-[500px]"
-                title="Email Preview"
-                sandbox="allow-same-origin"
-              />
+              <iframe srcDoc={html} className="w-full h-full border-0 min-h-[500px]" title="Email Preview" sandbox="allow-same-origin" />
             )}
           </div>
 
           {/* Customer details panel */}
           <div className="w-64 flex-shrink-0 overflow-y-auto border-l border-slate-200 bg-white">
             <div className="p-4 space-y-4">
-              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                Customer Details
-              </h3>
+              <h3 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Customer Details</h3>
 
               {current && (
                 <div className="space-y-3">
@@ -231,19 +410,17 @@ function EmailPreviewModal({
                       <MapPin className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                       <div className="min-w-0">
                         <p className="text-xs text-slate-400">Route</p>
-                        {current.pickup && <p className="text-xs text-slate-700">{current.pickup}</p>}
-                        {current.delivery && (
-                          <p className="text-xs text-slate-700">→ {current.delivery}</p>
-                        )}
+                        {current.pickup   && <p className="text-xs text-slate-700">{current.pickup}</p>}
+                        {current.delivery && <p className="text-xs text-slate-700">→ {current.delivery}</p>}
                       </div>
                     </div>
                   )}
-                  {(current as any).quote_id && (
+                  {current.quote_id && (
                     <div className="flex items-start gap-2">
                       <Hash className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
                       <div className="min-w-0">
                         <p className="text-xs text-slate-400">Quote ID</p>
-                        <p className="text-xs font-mono text-violet-700 break-words">{(current as any).quote_id}</p>
+                        <p className="text-xs font-mono text-violet-700 break-words">{current.quote_id}</p>
                       </div>
                     </div>
                   )}
@@ -256,13 +433,19 @@ function EmailPreviewModal({
                       </div>
                     </div>
                   )}
+                  {current.company && (
+                    <div className="flex items-start gap-2">
+                      <FileText className="h-3.5 w-3.5 text-slate-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-400">Company</p>
+                        <p className="text-xs text-slate-700 break-words">{current.company}</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-
               <div className="pt-3 border-t border-slate-100">
-                <p className="text-xs text-slate-400">
-                  Keyboard: ← → to navigate
-                </p>
+                <p className="text-xs text-slate-400">Keyboard: ← → to navigate</p>
               </div>
             </div>
           </div>
@@ -275,13 +458,14 @@ function EmailPreviewModal({
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function LeadsImport() {
-  const { toast }     = useToast();
-  const [, navigate]  = useLocation();
-  const fileInputRef  = useRef<HTMLInputElement>(null);
+  const { toast }    = useToast();
+  const [, navigate] = useLocation();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [file, setFile]                               = useState<File | null>(null);
   const [isUploading, setIsUploading]                 = useState(false);
   const [parseResult, setParseResult]                 = useState<ParseResult | null>(null);
+  const [userOverrides, setUserOverrides]             = useState<Record<string, string | null>>({});
   const [selectedTemplateId, setSelectedTemplateId]   = useState<string>("");
   const [emailStyle, setEmailStyle]                   = useState<EmailStyle>("clean");
   const [useSignatureBuilder, setUseSignatureBuilder] = useState(false);
@@ -295,12 +479,23 @@ export default function LeadsImport() {
 
   const selectedTemplate = useMemo(
     () => templates?.find(t => t.id.toString() === selectedTemplateId) ?? null,
-    [templates, selectedTemplateId]
+    [templates, selectedTemplateId],
   );
 
+  // Apply user overrides to rows so preview and campaign see correct field assignments
+  const mappedRows = useMemo<ParsedRow[]>(() => {
+    if (!parseResult) return [];
+    return applyOverridesToRows(
+      parseResult.rows,
+      parseResult.headers,
+      parseResult.columnMappings,
+      userOverrides,
+    );
+  }, [parseResult, userOverrides]);
+
   const readyRows = useMemo<ParsedRow[]>(
-    () => parseResult?.rows.filter(r => r.hasValidEmail === true && r.isDuplicate === false) ?? [],
-    [parseResult]
+    () => mappedRows.filter(r => r.hasValidEmail === true && r.isDuplicate === false),
+    [mappedRows],
   );
 
   useEffect(() => {
@@ -338,7 +533,9 @@ export default function LeadsImport() {
   }
 
   async function parseFile(f: File) {
-    setIsUploading(true); setParseResult(null);
+    setIsUploading(true);
+    setParseResult(null);
+    setUserOverrides({});
     try {
       const formData = new FormData();
       formData.append("file", f);
@@ -352,11 +549,24 @@ export default function LeadsImport() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? "Failed to parse file");
       }
-      setParseResult(await res.json());
+      const data = await res.json();
+      // Ensure columnMappings exists even if backend is old
+      if (!data.columnMappings) data.columnMappings = {};
+      setParseResult(data);
     } catch (err: any) {
       toast({ variant: "destructive", title: "Upload Failed", description: err.message });
       setFile(null);
-    } finally { setIsUploading(false); }
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  function handleOverride(header: string, variable: string | null) {
+    setUserOverrides(prev => ({ ...prev, [header]: variable }));
+  }
+
+  function handleResetOverrides() {
+    setUserOverrides({});
   }
 
   async function handleCreateCampaign() {
@@ -379,19 +589,20 @@ export default function LeadsImport() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to create campaign");
-
-      toast({
-        title: `Campaign created — ${data.valid} leads imported`,
-        description: "Go to your campaign to start sending.",
-      });
+      toast({ title: `Campaign created — ${data.valid} leads imported`, description: "Go to your campaign to start sending." });
       navigate(`/campaigns/${data.campaignId}`);
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
-    } finally { setIsCreating(false); }
+    } finally {
+      setIsCreating(false);
+    }
   }
 
   function handleReset() {
-    setFile(null); setParseResult(null); setCampaignName("");
+    setFile(null);
+    setParseResult(null);
+    setCampaignName("");
+    setUserOverrides({});
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -478,7 +689,7 @@ export default function LeadsImport() {
                 <FileIcon className="h-5 w-5 text-blue-500 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-slate-800 truncate">{file.name}</p>
-                  <p className="text-xs text-slate-400">{parseResult.totalRows} rows · {parseResult.detectedFields.length} fields</p>
+                  <p className="text-xs text-slate-400">{parseResult.totalRows} rows · {parseResult.headers.length} columns</p>
                 </div>
                 <Button variant="ghost" size="sm" onClick={handleReset} className="text-slate-400 hover:text-slate-600 h-7 px-2">
                   <RefreshCw className="h-3.5 w-3.5" />
@@ -512,6 +723,25 @@ export default function LeadsImport() {
         </div>
       </div>
 
+      {/* Variable Mapping Panel — shown after a file is parsed */}
+      <AnimatePresence>
+        {parseResult && parseResult.headers.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+          >
+            <VariableMappingPanel
+              headers={parseResult.headers}
+              columnMappings={parseResult.columnMappings}
+              userOverrides={userOverrides}
+              onOverride={handleOverride}
+              onResetAll={handleResetOverrides}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Step 3: Configure Campaign */}
       <AnimatePresence>
         {selectedTemplate && parseResult && readyCount > 0 && (
@@ -533,9 +763,8 @@ export default function LeadsImport() {
                 <Input
                   value={campaignName}
                   onChange={e => setCampaignName(e.target.value)}
-                  placeholder="e.g. May Leads Batch 1"
+                  placeholder="e.g. May Broker Leads"
                   className="rounded-xl border-slate-200"
-                  maxLength={80}
                 />
               </div>
 
@@ -627,7 +856,6 @@ export default function LeadsImport() {
 
             {/* Campaign Summary + Actions */}
             <div className="px-5 py-4 bg-slate-50 space-y-4">
-              {/* Summary grid */}
               <div>
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Campaign Summary</p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -638,9 +866,7 @@ export default function LeadsImport() {
                     </div>
                     <p className="text-xl font-bold text-slate-900">{readyCount}</p>
                     {parseResult && (parseResult.invalidRows > 0 || parseResult.duplicateRows > 0) && (
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        +{parseResult.invalidRows + parseResult.duplicateRows} skipped
-                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">+{parseResult.invalidRows + parseResult.duplicateRows} skipped</p>
                     )}
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-3">
@@ -650,9 +876,7 @@ export default function LeadsImport() {
                         : <Server className="h-3.5 w-3.5 text-blue-500" />}
                       <span className="text-xs text-slate-500">Method</span>
                     </div>
-                    <p className="text-sm font-bold text-slate-900">
-                      {sendMode === "gmail" ? "Gmail Drafts" : "SMTP Direct"}
-                    </p>
+                    <p className="text-sm font-bold text-slate-900">{sendMode === "gmail" ? "Gmail Drafts" : "SMTP Direct"}</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-3">
                     <div className="flex items-center gap-1.5 mb-1">
@@ -660,9 +884,7 @@ export default function LeadsImport() {
                       <span className="text-xs text-slate-500">Style</span>
                     </div>
                     <p className="text-sm font-bold text-slate-900 capitalize">{emailStyle}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      {useSignatureBuilder ? "Signature on" : "No signature"}
-                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">{useSignatureBuilder ? "Signature on" : "No signature"}</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-3">
                     <div className="flex items-center gap-1.5 mb-1">
@@ -737,8 +959,8 @@ export default function LeadsImport() {
         </div>
       )}
 
-      {/* Email Preview Modal */}
-      {canPreview && selectedTemplate && (
+      {/* Preview modal — uses override-applied rows */}
+      {showPreview && selectedTemplate && (
         <EmailPreviewModal
           open={showPreview}
           onClose={() => setShowPreview(false)}
