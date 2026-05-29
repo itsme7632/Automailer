@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { db, usersTable, plansTable, campaignsTable, emailQueueTable, leadsTable } from "@workspace/db";
+import { db, pool, usersTable, plansTable, campaignsTable, emailQueueTable, leadsTable } from "@workspace/db";
 import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { processCampaignFully } from "./routes/campaigns";
 import { hashPassword } from "./lib/auth";
@@ -184,5 +184,76 @@ async function startupRecovery(): Promise<void> {
 }
 
 startupRecovery().catch(() => {});
+
+// ---------------------------------------------------------------------------
+// Startup schema validation — compares DB columns against Drizzle schema
+// Logs [SCHEMA MISMATCH] for any missing columns before the app accepts traffic
+// ---------------------------------------------------------------------------
+const EXPECTED_SCHEMA: Record<string, string[]> = {
+  email_queue: [
+    "id", "job_id", "user_id", "mailbox_id", "template_id",
+    "campaign_id", "lead_id", "email", "subject", "row_data_json",
+    "style", "use_signature_builder", "status", "attempts",
+    "deferred_count", "last_error", "quote_id", "tracking_id",
+    "first_attempt_at", "retry_after", "sent_at", "created_at",
+  ],
+  campaigns: [
+    "id", "user_id", "name", "status", "template_id",
+    "total_leads", "drafted_count", "failed_count", "file_name",
+    "send_mode", "sent_count", "current_job_id", "email_style",
+    "use_signature", "cooldown_until", "created_at", "updated_at",
+  ],
+  leads: [
+    "id", "user_id", "campaign_id", "name", "email",
+    "vehicle", "route", "pickup", "delivery", "price", "notes",
+    "quote_id", "status", "gmail_draft_id", "error_message",
+    "sent_at", "created_at", "updated_at",
+  ],
+  mailboxes: [
+    "id", "user_id", "smtp_host", "smtp_port", "smtp_user",
+    "smtp_pass_encrypted", "smtp_secure",
+    "imap_host", "imap_port", "imap_user", "imap_pass_encrypted",
+    "from_name", "reply_to", "is_active",
+    "batch_size", "delay_seconds", "max_per_hour",
+    "created_at", "updated_at",
+  ],
+};
+
+async function validateSchema(): Promise<void> {
+  let allOk = true;
+  try {
+    for (const [table, expected] of Object.entries(EXPECTED_SCHEMA)) {
+      const { rows } = await pool.query<{ column_name: string }>(
+        `SELECT column_name FROM information_schema.columns WHERE table_name = $1 ORDER BY ordinal_position`,
+        [table],
+      );
+      if (rows.length === 0) {
+        logger.error({ table }, `[SCHEMA MISMATCH] Table "${table}" does not exist in the database`);
+        allOk = false;
+        continue;
+      }
+      const actual = new Set(rows.map(r => r.column_name));
+      const missing = expected.filter(c => !actual.has(c));
+      const extra   = [...actual].filter(c => !expected.includes(c));
+      if (missing.length > 0) {
+        allOk = false;
+        logger.error({ table, missingColumns: missing },
+          `[SCHEMA MISMATCH] Table "${table}" is MISSING columns: ${missing.join(", ")} — run: cd lib/db && pnpm run push`);
+      } else {
+        logger.info({ table, columnCount: actual.size, extraColumns: extra.length > 0 ? extra : undefined },
+          `[SCHEMA OK] Table "${table}" — all ${expected.length} required columns present`);
+      }
+    }
+    if (allOk) {
+      logger.info("[SCHEMA VALIDATION] All tables OK — schema is fully synchronized");
+    } else {
+      logger.error("[SCHEMA VALIDATION] Schema mismatches detected — campaign sends WILL fail until migrations are applied");
+    }
+  } catch (err) {
+    logger.warn({ err }, "[SCHEMA VALIDATION] Could not validate schema (non-fatal)");
+  }
+}
+
+validateSchema().catch(() => {});
 
 export default app;
