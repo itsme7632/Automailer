@@ -179,8 +179,44 @@ export async function processCampaignJobQueue(
         .limit(1);
 
       if (!item) {
-        logger.info({ jobId, campaignId }, "[QUEUE] No pending/deferred items found — exiting loop");
-        break;
+        // No immediately-ready item. Check whether a future deferred item exists.
+        const [nextDeferred] = await db
+          .select({ id: emailQueueTable.id, retryAfter: emailQueueTable.retryAfter })
+          .from(emailQueueTable)
+          .where(and(
+            eq(emailQueueTable.jobId, jobId),
+            eq(emailQueueTable.status, "deferred"),
+            isNotNull(emailQueueTable.retryAfter),
+          ))
+          .orderBy(emailQueueTable.retryAfter)
+          .limit(1);
+
+        if (!nextDeferred || !nextDeferred.retryAfter) {
+          logger.info({ jobId, campaignId }, "[QUEUE] No pending or deferred items remain — exiting loop");
+          break;
+        }
+
+        const waitMs = Math.max(0, nextDeferred.retryAfter.getTime() - Date.now());
+        logger.info({ jobId, campaignId, queueItemId: nextDeferred.id, retryAfter: nextDeferred.retryAfter, waitMs },
+          "[QUEUE] 7. All items deferred — sleeping until retry window (poll every 30s for pause/cancel)");
+
+        let remaining = waitMs;
+        let aborted   = false;
+        while (remaining > 0 && activeJobs.get(jobId)) {
+          await sleep(Math.min(30_000, remaining));
+          remaining -= 30_000;
+          const [campCheck] = await db.select({ status: campaignsTable.status })
+            .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+          if (!campCheck || campCheck.status === "paused" || campCheck.status === "cancelled") {
+            logger.info({ jobId, campaignId, status: campCheck?.status },
+              "[QUEUE] Pause/cancel detected during deferred wait — stopping");
+            aborted = true;
+            break;
+          }
+        }
+        if (aborted) break;
+        logger.info({ jobId, campaignId }, "[QUEUE] Retry window reached — resuming processing loop");
+        continue;
       }
 
       logger.info({ jobId, campaignId, queueItemId: item.id, email: item.email }, "[QUEUE] 2. Queue item picked up");
@@ -481,8 +517,44 @@ export async function processCampaignFully(
         .limit(1);
 
       if (!item) {
-        logger.info({ campaignId }, "[CAMPAIGN] No pending/deferred items found — exiting loop");
-        break;
+        // No immediately-ready item. Check whether a future deferred item exists.
+        const [nextDeferred] = await db
+          .select({ id: emailQueueTable.id, retryAfter: emailQueueTable.retryAfter })
+          .from(emailQueueTable)
+          .where(and(
+            eq(emailQueueTable.campaignId, campaignId),
+            eq(emailQueueTable.status, "deferred"),
+            isNotNull(emailQueueTable.retryAfter),
+          ))
+          .orderBy(emailQueueTable.retryAfter)
+          .limit(1);
+
+        if (!nextDeferred || !nextDeferred.retryAfter) {
+          logger.info({ campaignId }, "[CAMPAIGN] No pending or deferred items remain — exiting loop");
+          break;
+        }
+
+        const waitMs = Math.max(0, nextDeferred.retryAfter.getTime() - Date.now());
+        logger.info({ campaignId, queueItemId: nextDeferred.id, retryAfter: nextDeferred.retryAfter, waitMs },
+          "[CAMPAIGN] 7. All items deferred — sleeping until retry window (poll every 30s for pause/cancel)");
+
+        let remaining = waitMs;
+        let aborted   = false;
+        while (remaining > 0 && activeJobs.get(key)) {
+          await sleep(Math.min(30_000, remaining));
+          remaining -= 30_000;
+          const [campCheck] = await db.select({ status: campaignsTable.status })
+            .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+          if (!campCheck || campCheck.status === "paused" || campCheck.status === "cancelled") {
+            logger.info({ campaignId, status: campCheck?.status },
+              "[CAMPAIGN] Pause/cancel detected during deferred wait — stopping");
+            aborted = true;
+            break;
+          }
+        }
+        if (aborted) break;
+        logger.info({ campaignId }, "[CAMPAIGN] Retry window reached — resuming processing loop");
+        continue;
       }
 
       logger.info({ campaignId, queueItemId: item.id, email: item.email }, "[CAMPAIGN] 2. Queue item picked up");
