@@ -16,6 +16,7 @@ import trackingRouter from "./tracking";
 import mailboxRouter from "./mailbox";
 import billingRouter from "./billing";
 import sentEmailsRouter from "./sent-emails";
+import notificationsRouter from "./notifications";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(trackingRouter);
 router.use(mailboxRouter);
 router.use(billingRouter);
 router.use(sentEmailsRouter);
+router.use(notificationsRouter);
 
 export default router;

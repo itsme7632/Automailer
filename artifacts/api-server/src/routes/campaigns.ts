@@ -1261,10 +1261,22 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
 
   let totalOpens  = 0;
   let uniqueOpens = 0;
+  let opensTimeline: Array<{ date: string; opens: number }> = [];
+  let mostEngaged: Array<{
+    email: string | null;
+    name:  string | null;
+    opens: number;
+    firstOpenAt: string | null;
+    lastOpenAt:  string | null;
+  }> = [];
 
   if (campaign.sendMode === "smtp") {
     const queueItems = await db
-      .select({ trackingId: emailQueueTable.trackingId })
+      .select({
+        trackingId:  emailQueueTable.trackingId,
+        email:       emailQueueTable.email,
+        rowDataJson: emailQueueTable.rowDataJson,
+      })
       .from(emailQueueTable)
       .where(and(eq(emailQueueTable.campaignId, campaignId), eq(emailQueueTable.status, "success")));
 
@@ -1272,13 +1284,24 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
 
     if (trackingIds.length > 0) {
       const draftRows = await db
-        .select({ id: draftsTable.id })
+        .select({ id: draftsTable.id, trackingId: draftsTable.trackingId })
         .from(draftsTable)
         .where(inArray(draftsTable.trackingId, trackingIds));
 
       const draftIds = draftRows.map(d => d.id);
 
+      // Build lookup maps for mostEngaged enrichment
+      const draftToTracking = new Map<number, string>();
+      for (const d of draftRows) {
+        if (d.trackingId) draftToTracking.set(d.id, d.trackingId);
+      }
+      const trackingToQueue = new Map<string, typeof queueItems[0]>();
+      for (const q of queueItems) {
+        if (q.trackingId) trackingToQueue.set(q.trackingId, q);
+      }
+
       if (draftIds.length > 0) {
+        // Aggregate totals
         const [openStats] = await db
           .select({
             total:  sql<number>`count(*)::int`,
@@ -1294,6 +1317,60 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
 
         totalOpens  = openStats?.total  ?? 0;
         uniqueOpens = openStats?.unique ?? 0;
+
+        // Opens timeline — last 14 days grouped by day
+        const timelineRows = await db
+          .select({
+            date:  sql<string>`date_trunc('day', ${emailTrackingEventsTable.createdAt})::text`,
+            opens: sql<number>`count(*)::int`,
+          })
+          .from(emailTrackingEventsTable)
+          .where(
+            and(
+              inArray(emailTrackingEventsTable.draftId, draftIds),
+              eq(emailTrackingEventsTable.eventType, "open"),
+              gte(emailTrackingEventsTable.createdAt, new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)),
+            )
+          )
+          .groupBy(sql`date_trunc('day', ${emailTrackingEventsTable.createdAt})`)
+          .orderBy(sql`date_trunc('day', ${emailTrackingEventsTable.createdAt})`);
+
+        opensTimeline = timelineRows.map(r => ({ date: r.date, opens: r.opens }));
+
+        // Most engaged leads — top 5 by open count
+        const opensByDraft = await db
+          .select({
+            draftId:     emailTrackingEventsTable.draftId,
+            opens:       sql<number>`count(*)::int`,
+            firstOpenAt: sql<string>`min(${emailTrackingEventsTable.createdAt})::text`,
+            lastOpenAt:  sql<string>`max(${emailTrackingEventsTable.createdAt})::text`,
+          })
+          .from(emailTrackingEventsTable)
+          .where(
+            and(
+              inArray(emailTrackingEventsTable.draftId, draftIds),
+              eq(emailTrackingEventsTable.eventType, "open"),
+            )
+          )
+          .groupBy(emailTrackingEventsTable.draftId)
+          .orderBy(sql`count(*) desc`)
+          .limit(5);
+
+        mostEngaged = opensByDraft
+          .map(o => {
+            const tId   = o.draftId != null ? draftToTracking.get(o.draftId) : null;
+            const qItem = tId ? trackingToQueue.get(tId) : null;
+            let row: Record<string, string> = {};
+            try { if (qItem?.rowDataJson) row = JSON.parse(qItem.rowDataJson); } catch {}
+            return {
+              email:       qItem?.email ?? null,
+              name:        row.name ?? row.companyName ?? null,
+              opens:       o.opens,
+              firstOpenAt: o.firstOpenAt ?? null,
+              lastOpenAt:  o.lastOpenAt  ?? null,
+            };
+          })
+          .filter(e => e.email);
       }
     }
   }
@@ -1306,6 +1383,7 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
     total, sent, failed, remaining,
     totalOpens, uniqueOpens,
     deliveryRate, failedRate, openRate,
+    opensTimeline, mostEngaged,
     sendMode: campaign.sendMode,
   });
 });

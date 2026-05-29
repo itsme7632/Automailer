@@ -38,6 +38,19 @@ type SentEmail = {
 type TimelineEvent = { type: string; timestamp: string; detail?: string };
 type StatusFilter = "all" | "delivered" | "failed" | "opened" | "unopened";
 
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60)  return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7)   return `${d}d ago`;
+  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem("auth_token");
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -584,8 +597,13 @@ export default function SentEmails() {
                     </TableCell>
                     <TableCell>
                       <TrackingBadge status={email.status} trackingId={email.trackingId} openCount={email.openCount} errorLabel={email.errorLabel} retryMinutes={email.retryMinutes} deferredCount={email.deferredCount} />
-                      {email.firstOpenedAt && (
-                        <div className="text-xs text-slate-400 mt-1">First: {new Date(email.firstOpenedAt).toLocaleDateString()}</div>
+                      {email.openCount > 0 && email.lastOpenedAt && (
+                        <div className="text-xs text-slate-400 mt-1 leading-tight">
+                          {email.openCount > 1 && email.firstOpenedAt
+                            ? `First ${formatRelativeTime(email.firstOpenedAt)} · Last ${formatRelativeTime(email.lastOpenedAt)}`
+                            : `Opened ${formatRelativeTime(email.lastOpenedAt)}`
+                          }
+                        </div>
                       )}
                     </TableCell>
                     <TableCell onClick={e => e.stopPropagation()}>

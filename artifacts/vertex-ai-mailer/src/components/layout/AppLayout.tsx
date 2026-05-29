@@ -28,6 +28,7 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { NotificationBell } from "@/components/NotificationBell";
 
 const NAV_ITEMS = [
   { href: "/dashboard",         icon: LayoutDashboard, label: "Dashboard",        exact: true },
@@ -94,11 +95,14 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
             style={{ maxWidth: "160px" }}
           />
         </Link>
-        {onClose && (
-          <button onClick={onClose} className="ml-auto p-1.5 rounded hover:bg-slate-100 text-slate-400 flex-shrink-0">
-            <X className="h-4 w-4" />
-          </button>
-        )}
+        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+          {!onClose && <NotificationBell />}
+          {onClose && (
+            <button onClick={onClose} className="p-1.5 rounded hover:bg-slate-100 text-slate-400">
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Nav */}
@@ -200,6 +204,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
               style={{ maxWidth: "140px" }}
             />
           </Link>
+          <div className="ml-auto">
+            <NotificationBell />
+          </div>
         </header>
 
         <main className="flex-1 overflow-auto">

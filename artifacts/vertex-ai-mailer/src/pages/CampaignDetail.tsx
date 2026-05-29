@@ -138,6 +138,11 @@ export default function CampaignDetail() {
         totalOpens: number; uniqueOpens: number;
         deliveryRate: number; failedRate: number; openRate: number;
         sendMode: string;
+        opensTimeline: Array<{ date: string; opens: number }>;
+        mostEngaged: Array<{
+          email: string | null; name: string | null;
+          opens: number; firstOpenAt: string | null; lastOpenAt: string | null;
+        }>;
       }>;
     },
   });
@@ -1027,6 +1032,76 @@ export default function CampaignDetail() {
                   )}
                 </div>
               )}
+              {/* Opens Timeline */}
+              {analytics.opensTimeline && analytics.opensTimeline.length > 0 && (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-semibold text-slate-600 mb-3">Opens per Day (last 14 days)</p>
+                  <div className="flex items-end gap-1 h-16">
+                    {(() => {
+                      const maxOpens = Math.max(...analytics.opensTimeline.map(r => r.opens), 1);
+                      return analytics.opensTimeline.map((r, i) => (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-0.5 group">
+                          <div
+                            className="w-full bg-blue-500 rounded-sm transition-all duration-300 group-hover:bg-blue-600"
+                            style={{ height: `${Math.max(4, Math.round((r.opens / maxOpens) * 56))}px` }}
+                            title={`${new Date(r.date).toLocaleDateString([], { month: "short", day: "numeric" })}: ${r.opens} open${r.opens !== 1 ? "s" : ""}`}
+                          />
+                          <span className="text-[9px] text-slate-400 rotate-[-45deg] origin-center" style={{ display: "none" }}>
+                            {new Date(r.date).toLocaleDateString([], { month: "short", day: "numeric" })}
+                          </span>
+                        </div>
+                      ));
+                    })()}
+                  </div>
+                  <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+                    <span>{new Date(analytics.opensTimeline[0].date).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                    <span>{new Date(analytics.opensTimeline[analytics.opensTimeline.length - 1].date).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Most Engaged Leads */}
+              {analytics.mostEngaged && analytics.mostEngaged.length > 0 && (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-semibold text-slate-600 mb-3">Most Engaged Leads</p>
+                  <div className="space-y-2">
+                    {analytics.mostEngaged.map((lead, i) => (
+                      <div key={i} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3.5 py-2.5">
+                        <div className="h-7 w-7 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-blue-700">
+                          {i + 1}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-900 truncate">
+                            {lead.name ?? lead.email ?? "Unknown"}
+                          </p>
+                          {lead.name && (
+                            <p className="text-xs text-slate-400 truncate">{lead.email}</p>
+                          )}
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="flex items-center gap-1 justify-end">
+                            <Eye className="h-3 w-3 text-blue-500" />
+                            <span className="text-xs font-bold text-slate-800">{lead.opens}</span>
+                          </div>
+                          {lead.lastOpenAt && (
+                            <p className="text-[10px] text-slate-400 mt-0.5">
+                              {(() => {
+                                const diff = Date.now() - new Date(lead.lastOpenAt).getTime();
+                                const m = Math.floor(diff / 60000);
+                                if (m < 60) return `${m}m ago`;
+                                const h = Math.floor(m / 60);
+                                if (h < 24) return `${h}h ago`;
+                                return `${Math.floor(h / 24)}d ago`;
+                              })()}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="mt-3 flex justify-end">
                 <Link href="/sent-emails" className="text-xs text-primary hover:underline flex items-center gap-1">
                   View all sent emails →

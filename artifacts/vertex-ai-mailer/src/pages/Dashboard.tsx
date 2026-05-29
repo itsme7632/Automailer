@@ -1,15 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useGetDashboardStats, useGetDashboardActivity, useGetGmailStatus, useGetDrafts } from "@workspace/api-client-react";
 import { useAuth } from "@/context/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Mail, CheckCircle2, AlertCircle, Clock, ArrowRight,
   FileText, UploadCloud, TrendingUp, Wifi, Settings,
   Send, LayoutDashboard, Inbox, TimerReset, Zap,
   PlayCircle, PauseCircle, AlertTriangle, BarChart3,
-  Activity, RefreshCw, ChevronRight,
+  Activity, RefreshCw, ChevronRight, Eye,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -18,7 +18,31 @@ const fadeUp = {
   show:   (i: number) => ({ opacity: 1, y: 0, transition: { delay: i * 0.06, duration: 0.28 } }),
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60)  return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60)  return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24)  return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+interface OpenEvent {
+  id: number;
+  openedAt: string;
+  email: string | null;
+  customerName: string | null;
+  subject: string | null;
+  campaignId: number | null;
+  isAppleMail: boolean;
+}
 
 interface QuotaData {
   hourlyLimit:      number;
@@ -259,6 +283,8 @@ export default function Dashboard() {
   const [campaigns,        setCampaigns]       = useState<Campaign[]>([]);
   const [campaignsLoading, setCampaignsLoading]= useState(true);
   const [connectingGmail,  setConnectingGmail] = useState(false);
+  const [liveActivity,     setLiveActivity]    = useState<OpenEvent[]>([]);
+  const [liveLoading,      setLiveLoading]     = useState(true);
 
   const firstName = user?.name?.split(" ")[0] ?? "there";
   const token     = () => localStorage.getItem("auth_token") ?? "";
@@ -300,6 +326,25 @@ export default function Dashboard() {
     }
     fetchCampaigns();
   }, []);
+
+  const fetchLiveActivity = useCallback(async () => {
+    try {
+      const res = await fetch("/api/notifications/live?limit=8", {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (res.ok) {
+        const d = await res.json();
+        setLiveActivity(d.events ?? []);
+      }
+    } catch {}
+    finally { setLiveLoading(false); }
+  }, []);
+
+  useEffect(() => {
+    fetchLiveActivity();
+    const id = setInterval(fetchLiveActivity, 10_000);
+    return () => clearInterval(id);
+  }, [fetchLiveActivity]);
 
   const activeCampaigns   = campaigns.filter(c => c.status === "active").length;
   const coolingCampaigns  = campaigns.filter(c => c.status === "cooling_down").length;
@@ -549,43 +594,87 @@ export default function Dashboard() {
           {/* SMTP Health */}
           <SmtpHealthCard quota={quota} loading={quotaLoading} />
 
-          {/* Activity Feed */}
+          {/* Live Lead Activity */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-3">
-              <div className="h-8 w-8 rounded-lg bg-slate-50 flex items-center justify-center">
-                <RefreshCw className="h-4 w-4 text-slate-500" />
+            <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg bg-emerald-50 flex items-center justify-center">
+                  <Eye className="h-4 w-4 text-emerald-600" />
+                </div>
+                <div>
+                  <h2 className="font-semibold text-slate-900 text-sm flex items-center gap-2">
+                    Live Lead Activity
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded-full">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Live
+                    </span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">Email opens in real time</p>
+                </div>
               </div>
-              <div>
-                <h2 className="font-semibold text-slate-900 text-sm">Recent Activity</h2>
-                <p className="text-xs text-slate-400 mt-0.5">System events</p>
-              </div>
+              <Button
+                variant="ghost" size="sm"
+                onClick={fetchLiveActivity}
+                className="text-slate-400 hover:text-slate-600 rounded-lg p-1.5 h-auto"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+              </Button>
             </div>
             <div className="p-3 space-y-0.5 max-h-72 overflow-auto">
-              {activityLoading ? (
+              {liveLoading ? (
                 <div className="space-y-2 p-2">
-                  {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-11 w-full rounded-lg" />)}
+                  {[1, 2, 3].map(i => <Skeleton key={i} className="h-11 w-full rounded-lg" />)}
                 </div>
-              ) : activity?.length ? (
-                activity.map(item => (
-                  <div key={item.id} className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors">
-                    <div className="h-6 w-6 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <Clock className="h-3 w-3 text-blue-500" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs text-slate-700 leading-relaxed">{item.description}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        {new Date(item.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
-                      </p>
-                    </div>
-                  </div>
-                ))
+              ) : liveActivity.length > 0 ? (
+                <AnimatePresence initial={false}>
+                  {liveActivity.map(event => (
+                    <motion.div
+                      key={event.id}
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors"
+                    >
+                      <div className={`h-7 w-7 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                        event.isAppleMail ? "bg-slate-50" : "bg-emerald-50"
+                      }`}>
+                        <Eye className={`h-3.5 w-3.5 ${event.isAppleMail ? "text-slate-400" : "text-emerald-600"}`} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-slate-900 truncate">
+                          {event.customerName ?? event.email ?? "Unknown"}
+                        </p>
+                        {event.email && event.customerName && (
+                          <p className="text-xs text-slate-400 truncate">{event.email}</p>
+                        )}
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          <span className="text-xs text-slate-400">{timeAgo(event.openedAt)}</span>
+                          {event.isAppleMail && (
+                            <span className="text-[10px] text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                              Apple Mail
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
               ) : (
                 <div className="flex flex-col items-center justify-center py-10 text-slate-400">
-                  <CheckCircle2 className="h-8 w-8 mb-2 opacity-25" />
-                  <p className="text-xs">No recent activity</p>
+                  <Eye className="h-8 w-8 mb-2 opacity-25" />
+                  <p className="text-xs font-medium">No opens tracked yet</p>
+                  <p className="text-xs mt-1 text-center px-4">
+                    Opens appear here once a lead reads your email.
+                  </p>
                 </div>
               )}
             </div>
+            {liveActivity.length > 0 && (
+              <div className="px-5 py-2.5 border-t border-slate-50">
+                <Link href="/sent-emails" className="text-xs text-primary hover:underline">
+                  View all sent emails →
+                </Link>
+              </div>
+            )}
           </div>
         </div>
       </div>
