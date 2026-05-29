@@ -5,9 +5,13 @@ import {
   plansTable, subscriptionsTable, planRequestsTable, supportTicketsTable,
   templatesTable,
 } from "@workspace/db";
-import { count, desc, sql, eq, gte, and, or, ilike } from "drizzle-orm";
+import { count, desc, sql, eq, gte, and, or, ilike, isNotNull } from "drizzle-orm";
 import { requireAdmin } from "../lib/auth";
 import { logger } from "../lib/logger";
+import multer from "multer";
+import JSZip from "jszip";
+
+const memUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
 const router: IRouter = Router();
 
@@ -794,95 +798,172 @@ router.get("/admin/export/settings", requireAdmin, async (_req, res): Promise<vo
   res.json({ ...DEFAULT_SETTINGS, ...stored });
 });
 
-// ─── Full Backup ──────────────────────────────────────────────────────────────
+// ─── Full Backup (ZIP) ────────────────────────────────────────────────────────
 
 router.get("/admin/backup/full", requireAdmin, async (_req, res): Promise<void> => {
   try {
-    const [users, campaigns, templates, plans, settingsRows] = await Promise.all([
+    const exportedAt = new Date().toISOString();
+
+    const [usersRaw, campaigns, templates, plans, settingsRows, mailboxes] = await Promise.all([
       db.select({
-        id: usersTable.id, email: usersTable.email, name: usersTable.name,
-        role: usersTable.role, plan: usersTable.plan, credits: usersTable.credits,
-        status: usersTable.status, timezone: usersTable.timezone, aiTone: usersTable.aiTone,
-        companyName: usersTable.companyName, companyTagline: usersTable.companyTagline,
-        companyWebsite: usersTable.companyWebsite, companyPhone: usersTable.companyPhone,
-        usdot: usersTable.usdot, mcNumber: usersTable.mcNumber, accentColor: usersTable.accentColor,
-        agentName: usersTable.agentName, useSignature: usersTable.useSignature,
+        id: usersTable.id,
+        email: usersTable.email,
+        name: usersTable.name,
+        passwordHash: usersTable.passwordHash,
+        role: usersTable.role,
+        plan: usersTable.plan,
+        credits: usersTable.credits,
+        status: usersTable.status,
+        timezone: usersTable.timezone,
+        aiTone: usersTable.aiTone,
+        companyName: usersTable.companyName,
+        companyTagline: usersTable.companyTagline,
+        companyWebsite: usersTable.companyWebsite,
+        companyPhone: usersTable.companyPhone,
+        usdot: usersTable.usdot,
+        mcNumber: usersTable.mcNumber,
+        accentColor: usersTable.accentColor,
+        agentName: usersTable.agentName,
+        useSignature: usersTable.useSignature,
+        logoUrl: usersTable.logoUrl,
+        lastLogin: usersTable.lastActiveAt,
         createdAt: usersTable.createdAt,
       }).from(usersTable).orderBy(usersTable.id),
       db.select().from(campaignsTable).orderBy(campaignsTable.id),
       db.select().from(templatesTable).orderBy(templatesTable.id),
       db.select().from(plansTable).orderBy(plansTable.sortOrder),
       db.select().from(adminSettingsTable),
+      db.select().from(mailboxesTable).orderBy(mailboxesTable.id),
     ]);
 
     const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]));
 
-    const backup = {
-      version: "1",
-      exportedAt: new Date().toISOString(),
-      settings,
-      users: users.map(u => ({ ...u, createdAt: u.createdAt.toISOString() })),
-      campaigns: campaigns.map(c => ({
-        ...c,
-        createdAt: c.createdAt.toISOString(),
-        updatedAt: c.updatedAt.toISOString(),
-        cooldownUntil: c.cooldownUntil?.toISOString() ?? null,
-      })),
-      templates: templates.map(t => ({
-        ...t,
-        createdAt: t.createdAt.toISOString(),
-        updatedAt: t.updatedAt.toISOString(),
-      })),
-      plans: plans.map(p => ({
-        ...p,
-        createdAt: p.createdAt.toISOString(),
-        updatedAt: p.updatedAt.toISOString(),
-      })),
+    // users.json — includes password hash for migration; NO plaintext passwords
+    const usersJson = usersRaw.map(u => ({
+      ...u,
+      lastLogin: u.lastLogin?.toISOString() ?? null,
+      createdAt: u.createdAt.toISOString(),
+    }));
+
+    // branding.json — per-user branding keyed by email (easy manual restore)
+    const brandingJson = usersRaw.map(u => ({
+      userEmail: u.email,
+      companyName: u.companyName,
+      companyTagline: u.companyTagline,
+      companyWebsite: u.companyWebsite,
+      companyPhone: u.companyPhone,
+      usdot: u.usdot,
+      mcNumber: u.mcNumber,
+      accentColor: u.accentColor,
+      agentName: u.agentName,
+      useSignature: u.useSignature,
+      logoUrl: u.logoUrl,
+    }));
+
+    const campaignsJson = campaigns.map(c => ({
+      ...c,
+      createdAt: c.createdAt.toISOString(),
+      updatedAt: c.updatedAt.toISOString(),
+      cooldownUntil: c.cooldownUntil?.toISOString() ?? null,
+    }));
+
+    const templatesJson = templates.map(t => ({
+      ...t,
+      createdAt: t.createdAt.toISOString(),
+      updatedAt: t.updatedAt.toISOString(),
+    }));
+
+    const plansJson = plans.map(p => ({
+      ...p,
+      createdAt: p.createdAt.toISOString(),
+      updatedAt: p.updatedAt.toISOString(),
+    }));
+
+    // mailboxes.json — encrypted passwords preserved for migration
+    const mailboxesJson = mailboxes.map(m => ({
+      ...m,
+      createdAt: m.createdAt.toISOString(),
+      updatedAt: m.updatedAt.toISOString(),
+    }));
+
+    const manifest = {
+      version: "2",
+      exportedAt,
+      files: ["manifest.json", "users.json", "campaigns.json", "settings.json",
+              "templates.json", "branding.json", "mailboxes.json", "plans.json"],
+      counts: {
+        users: usersJson.length, campaigns: campaignsJson.length,
+        templates: templatesJson.length, mailboxes: mailboxesJson.length,
+        plans: plansJson.length, settings: Object.keys(settings).length,
+      },
     };
 
-    const date = new Date().toISOString().split("T")[0];
-    res.setHeader("Content-Type", "application/json");
-    res.setHeader("Content-Disposition", `attachment; filename="brokermail_backup_${date}.json"`);
-    res.json(backup);
+    const zip = new JSZip();
+    zip.file("manifest.json",  JSON.stringify(manifest,      null, 2));
+    zip.file("users.json",     JSON.stringify(usersJson,     null, 2));
+    zip.file("campaigns.json", JSON.stringify(campaignsJson, null, 2));
+    zip.file("settings.json",  JSON.stringify(settings,      null, 2));
+    zip.file("templates.json", JSON.stringify(templatesJson, null, 2));
+    zip.file("branding.json",  JSON.stringify(brandingJson,  null, 2));
+    zip.file("mailboxes.json", JSON.stringify(mailboxesJson, null, 2));
+    zip.file("plans.json",     JSON.stringify(plansJson,     null, 2));
+
+    const content = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" });
+    const date = exportedAt.split("T")[0];
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", `attachment; filename="brokermail_backup_${date}.zip"`);
+    res.send(content);
   } catch (err: any) {
     logger.error({ err }, "Full backup error");
     res.status(500).json({ error: err?.message ?? "Backup failed" });
   }
 });
 
-// ─── Restore Full Backup ──────────────────────────────────────────────────────
+// ─── Restore Full Backup (ZIP) ────────────────────────────────────────────────
 
-router.post("/admin/restore/full", requireAdmin, async (req, res): Promise<void> => {
-  const backup = req.body as {
-    version?: string;
-    settings?: Record<string, string>;
-    users?: Record<string, any>[];
-    campaigns?: Record<string, any>[];
-    templates?: Record<string, any>[];
-    plans?: Record<string, any>[];
-  };
-
-  if (!backup || typeof backup !== "object") {
-    res.status(400).json({ error: "Invalid backup file." }); return;
+router.post("/admin/restore/full", requireAdmin, memUpload.single("file"), async (req, res): Promise<void> => {
+  if (!req.file?.buffer) {
+    res.status(400).json({ error: "No backup file uploaded. Send as multipart/form-data field 'file'." });
+    return;
   }
 
   const results: Record<string, number> = {
-    settings: 0, users: 0, campaigns: 0, templates: 0, plans: 0,
+    settings: 0, plans: 0, users: 0, campaigns: 0,
+    templates: 0, mailboxes: 0, branding: 0,
   };
+  const warnings: string[] = [];
 
   try {
+    const zip = await JSZip.loadAsync(req.file.buffer);
+
+    // Helper: parse a JSON file from zip (returns null if missing)
+    async function readZipJson<T>(name: string): Promise<T | null> {
+      const f = zip.file(name);
+      if (!f) return null;
+      return JSON.parse(await f.async("text")) as T;
+    }
+
+    // Validate manifest
+    const manifest = await readZipJson<{ version: string }>("manifest.json");
+    if (!manifest?.version) {
+      warnings.push("manifest.json missing or invalid — proceeding anyway");
+    }
+
     // 1. Restore settings
-    if (backup.settings && typeof backup.settings === "object") {
-      for (const [key, value] of Object.entries(backup.settings)) {
+    const settings = await readZipJson<Record<string, string>>("settings.json");
+    if (settings && typeof settings === "object") {
+      for (const [key, value] of Object.entries(settings)) {
+        if (typeof value !== "string") continue;
         await db.insert(adminSettingsTable).values({ key, value })
           .onConflictDoUpdate({ target: adminSettingsTable.key, set: { value } });
         results.settings++;
       }
     }
 
-    // 2. Restore plans (upsert by slug)
-    if (Array.isArray(backup.plans)) {
-      for (const p of backup.plans) {
+    // 2. Restore plans
+    const plans = await readZipJson<Record<string, any>[]>("plans.json");
+    if (Array.isArray(plans)) {
+      for (const p of plans) {
         if (!p.slug || !p.name) continue;
         await db.insert(plansTable).values({
           name: p.name, slug: p.slug, description: p.description ?? null,
@@ -908,65 +989,91 @@ router.post("/admin/restore/full", requireAdmin, async (req, res): Promise<void>
       }
     }
 
-    // 3. Restore users (upsert by email, never overwrite passwordHash or Gmail tokens)
+    // 3. Restore users — passwordHash IS restored so users can log in immediately
+    const users = await readZipJson<Record<string, any>[]>("users.json");
     const emailToNewId = new Map<string, number>();
-    if (Array.isArray(backup.users)) {
-      for (const u of backup.users) {
+    const oldIdToNewId = new Map<number, number>();
+
+    if (Array.isArray(users)) {
+      for (const u of users) {
         if (!u.email) continue;
-        const [existing] = await db.select({ id: usersTable.id })
+        const [existing] = await db.select({ id: usersTable.id, passwordHash: usersTable.passwordHash })
           .from(usersTable).where(eq(usersTable.email, u.email));
+
+        const sharedFields = {
+          name:           u.name ?? u.email,
+          role:           u.role ?? "user",
+          plan:           u.plan ?? "free",
+          credits:        typeof u.credits === "number" ? u.credits : 0,
+          status:         u.status ?? "active",
+          timezone:       u.timezone ?? "UTC",
+          aiTone:         u.aiTone ?? null,
+          companyName:    u.companyName ?? null,
+          companyTagline: u.companyTagline ?? null,
+          companyWebsite: u.companyWebsite ?? null,
+          companyPhone:   u.companyPhone ?? null,
+          usdot:          u.usdot ?? null,
+          mcNumber:       u.mcNumber ?? null,
+          accentColor:    u.accentColor ?? null,
+          agentName:      u.agentName ?? null,
+          useSignature:   u.useSignature ?? false,
+          logoUrl:        u.logoUrl ?? null,
+          // Restore passwordHash so login works immediately after migration
+          ...(u.passwordHash ? { passwordHash: u.passwordHash } : {}),
+        };
+
         if (existing) {
-          await db.update(usersTable).set({
-            name: u.name ?? existing.id.toString(),
-            role: u.role ?? "user",
-            plan: u.plan ?? "free",
-            credits: u.credits ?? 0,
-            status: u.status ?? "active",
-            timezone: u.timezone ?? "UTC",
-            companyName: u.companyName ?? null,
-            companyTagline: u.companyTagline ?? null,
-            companyWebsite: u.companyWebsite ?? null,
-            companyPhone: u.companyPhone ?? null,
-            usdot: u.usdot ?? null,
-            mcNumber: u.mcNumber ?? null,
-            accentColor: u.accentColor ?? null,
-            agentName: u.agentName ?? null,
-            updatedAt: new Date(),
-          }).where(eq(usersTable.id, existing.id));
+          await db.update(usersTable)
+            .set({ ...sharedFields, updatedAt: new Date() })
+            .where(eq(usersTable.id, existing.id));
           emailToNewId.set(u.email, existing.id);
         } else {
-          const [inserted] = await db.insert(usersTable).values({
-            email: u.email, name: u.name ?? u.email,
-            role: u.role ?? "user", plan: u.plan ?? "free",
-            credits: u.credits ?? 0, status: u.status ?? "active",
-            timezone: u.timezone ?? "UTC",
-            companyName: u.companyName ?? null,
-            companyTagline: u.companyTagline ?? null,
-            companyWebsite: u.companyWebsite ?? null,
-            companyPhone: u.companyPhone ?? null,
-          }).returning({ id: usersTable.id });
+          const [inserted] = await db.insert(usersTable)
+            .values({ email: u.email, ...sharedFields })
+            .returning({ id: usersTable.id });
           emailToNewId.set(u.email, inserted.id);
         }
         results.users++;
       }
-    }
 
-    // Build old-id → new-id map for users
-    const oldIdToNewId = new Map<number, number>();
-    if (Array.isArray(backup.users)) {
-      for (const u of backup.users) {
+      for (const u of users) {
         if (u.id != null && u.email && emailToNewId.has(u.email)) {
-          oldIdToNewId.set(u.id, emailToNewId.get(u.email)!);
+          oldIdToNewId.set(Number(u.id), emailToNewId.get(u.email)!);
         }
       }
     }
 
-    // 4. Restore templates
-    if (Array.isArray(backup.templates)) {
-      for (const t of backup.templates) {
+    // 4. Restore branding (separate file — updates existing users by email)
+    const branding = await readZipJson<Record<string, any>[]>("branding.json");
+    if (Array.isArray(branding)) {
+      for (const b of branding) {
+        if (!b.userEmail) continue;
+        const userId = emailToNewId.get(b.userEmail);
+        if (!userId) continue;
+        await db.update(usersTable).set({
+          companyName:    b.companyName    ?? null,
+          companyTagline: b.companyTagline ?? null,
+          companyWebsite: b.companyWebsite ?? null,
+          companyPhone:   b.companyPhone   ?? null,
+          usdot:          b.usdot          ?? null,
+          mcNumber:       b.mcNumber       ?? null,
+          accentColor:    b.accentColor    ?? null,
+          agentName:      b.agentName      ?? null,
+          useSignature:   b.useSignature   ?? false,
+          logoUrl:        b.logoUrl        ?? null,
+          updatedAt:      new Date(),
+        }).where(eq(usersTable.id, userId));
+        results.branding++;
+      }
+    }
+
+    // 5. Restore templates
+    const templates = await readZipJson<Record<string, any>[]>("templates.json");
+    if (Array.isArray(templates)) {
+      for (const t of templates) {
         if (!t.name || !t.subject || !t.body) continue;
-        const mappedUserId = oldIdToNewId.get(t.userId);
-        if (!mappedUserId) continue;
+        const mappedUserId = oldIdToNewId.get(Number(t.userId));
+        if (!mappedUserId) { warnings.push(`Template "${t.name}": user not found`); continue; }
         const [existing] = await db.select({ id: templatesTable.id })
           .from(templatesTable)
           .where(and(eq(templatesTable.userId, mappedUserId), eq(templatesTable.name, t.name)));
@@ -980,12 +1087,13 @@ router.post("/admin/restore/full", requireAdmin, async (req, res): Promise<void>
       }
     }
 
-    // 5. Restore campaigns
-    if (Array.isArray(backup.campaigns)) {
-      for (const c of backup.campaigns) {
+    // 6. Restore campaigns
+    const campaigns = await readZipJson<Record<string, any>[]>("campaigns.json");
+    if (Array.isArray(campaigns)) {
+      for (const c of campaigns) {
         if (!c.name) continue;
-        const mappedUserId = oldIdToNewId.get(c.userId);
-        if (!mappedUserId) continue;
+        const mappedUserId = oldIdToNewId.get(Number(c.userId));
+        if (!mappedUserId) { warnings.push(`Campaign "${c.name}": user not found`); continue; }
         const [existing] = await db.select({ id: campaignsTable.id })
           .from(campaignsTable)
           .where(and(eq(campaignsTable.userId, mappedUserId), eq(campaignsTable.name, c.name)));
@@ -1003,11 +1111,133 @@ router.post("/admin/restore/full", requireAdmin, async (req, res): Promise<void>
       }
     }
 
-    logger.info({ results }, "Full backup restored");
-    res.json({ success: true, message: "Backup restored successfully.", results });
+    // 7. Restore mailboxes — encrypted passwords preserved
+    const mailboxes = await readZipJson<Record<string, any>[]>("mailboxes.json");
+    if (Array.isArray(mailboxes)) {
+      for (const m of mailboxes) {
+        if (!m.smtpHost || !m.smtpUser || !m.smtpPassEncrypted) continue;
+        const mappedUserId = oldIdToNewId.get(Number(m.userId));
+        if (!mappedUserId) { warnings.push(`Mailbox for user ${m.userId}: user not found`); continue; }
+        const [existing] = await db.select({ id: mailboxesTable.id })
+          .from(mailboxesTable).where(eq(mailboxesTable.userId, mappedUserId));
+        if (!existing) {
+          await db.insert(mailboxesTable).values({
+            userId:           mappedUserId,
+            smtpHost:         m.smtpHost,
+            smtpPort:         m.smtpPort ?? 587,
+            smtpUser:         m.smtpUser,
+            smtpPassEncrypted: m.smtpPassEncrypted,
+            smtpSecure:       m.smtpSecure ?? "tls",
+            imapHost:         m.imapHost ?? null,
+            imapPort:         m.imapPort ?? 993,
+            imapUser:         m.imapUser ?? null,
+            imapPassEncrypted: m.imapPassEncrypted ?? null,
+            fromName:         m.fromName ?? null,
+            replyTo:          m.replyTo ?? null,
+            isActive:         m.isActive ?? true,
+            batchSize:        m.batchSize ?? 10,
+            delaySeconds:     m.delaySeconds ?? 15,
+            maxPerHour:       m.maxPerHour ?? 100,
+          });
+          results.mailboxes++;
+        }
+      }
+    }
+
+    logger.info({ results, warnings }, "ZIP backup restored");
+    res.json({
+      success: true,
+      message: "Backup restored successfully. Users can log in immediately using original passwords.",
+      results,
+      warnings: warnings.length ? warnings : undefined,
+    });
   } catch (err: any) {
-    logger.error({ err }, "Restore backup error");
+    logger.error({ err }, "Restore ZIP backup error");
     res.status(500).json({ error: err?.message ?? "Restore failed" });
+  }
+});
+
+// ─── Migration Verification ───────────────────────────────────────────────────
+
+router.get("/admin/migration/verify", requireAdmin, async (_req, res): Promise<void> => {
+  try {
+    const [
+      [usersTotal],
+      [usersWithHash],
+      [usersWithBranding],
+      [campaignsTotal],
+      [templatesTotal],
+      [mailboxesTotal],
+      [settingsTotal],
+      [plansTotal],
+    ] = await Promise.all([
+      db.select({ count: count() }).from(usersTable),
+      db.select({ count: count() }).from(usersTable).where(isNotNull(usersTable.passwordHash)),
+      db.select({ count: count() }).from(usersTable).where(isNotNull(usersTable.companyName)),
+      db.select({ count: count() }).from(campaignsTable),
+      db.select({ count: count() }).from(templatesTable),
+      db.select({ count: count() }).from(mailboxesTable),
+      db.select({ count: count() }).from(adminSettingsTable),
+      db.select({ count: count() }).from(plansTable),
+    ]);
+
+    const checks = {
+      users: {
+        label: "User Accounts",
+        count: usersTotal.count,
+        ok: usersTotal.count > 0,
+        detail: `${usersTotal.count} users`,
+      },
+      passwordHashes: {
+        label: "Password Hashes",
+        count: usersWithHash.count,
+        ok: usersWithHash.count > 0 && usersWithHash.count === usersTotal.count,
+        partial: usersWithHash.count > 0 && usersWithHash.count < usersTotal.count,
+        detail: `${usersWithHash.count} / ${usersTotal.count} users have hashes`,
+      },
+      templates: {
+        label: "Email Templates",
+        count: templatesTotal.count,
+        ok: templatesTotal.count > 0,
+        detail: `${templatesTotal.count} templates`,
+      },
+      campaigns: {
+        label: "Campaigns",
+        count: campaignsTotal.count,
+        ok: campaignsTotal.count > 0,
+        detail: `${campaignsTotal.count} campaigns`,
+      },
+      mailboxes: {
+        label: "Mailboxes (SMTP)",
+        count: mailboxesTotal.count,
+        ok: mailboxesTotal.count > 0,
+        detail: `${mailboxesTotal.count} mailboxes`,
+      },
+      branding: {
+        label: "Branding Profiles",
+        count: usersWithBranding.count,
+        ok: usersWithBranding.count > 0,
+        detail: `${usersWithBranding.count} users with branding`,
+      },
+      settings: {
+        label: "Platform Settings",
+        count: settingsTotal.count,
+        ok: settingsTotal.count > 0,
+        detail: `${settingsTotal.count} settings keys`,
+      },
+      plans: {
+        label: "Subscription Plans",
+        count: plansTotal.count,
+        ok: plansTotal.count > 0,
+        detail: `${plansTotal.count} plans`,
+      },
+    };
+
+    const allOk = Object.values(checks).every(c => c.ok || ("partial" in c && c.partial));
+    res.json({ ok: allOk, checks, verifiedAt: new Date().toISOString() });
+  } catch (err: any) {
+    logger.error({ err }, "Migration verify error");
+    res.status(500).json({ error: err?.message ?? "Verification failed" });
   }
 });
 

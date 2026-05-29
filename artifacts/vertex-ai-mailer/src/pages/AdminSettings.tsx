@@ -12,7 +12,7 @@ import {
   ToggleLeft, Sliders, Lock, HelpCircle, Download, Bell,
   Coins, MailCheck, Trash2, MessageSquare, Send, Reply,
   UserCheck, Zap, Scale, PlusCircle, MinusCircle, X,
-  Upload, RotateCcw, Archive, HardDrive,
+  Upload, RotateCcw, Archive, HardDrive, ClipboardList, ShieldCheck,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -388,6 +388,7 @@ const SUB_TABS: { id: SubTab; label: string; icon: React.ElementType; group?: st
   { id: "notifications",label: "Notifications", icon: Bell,          group: "Admin" },
   { id: "support",      label: "Support",       icon: HelpCircle,    group: "Admin" },
   { id: "backup",       label: "Backup",        icon: Download,      group: "Admin" },
+  { id: "migration",    label: "Migration",     icon: ClipboardList, group: "Admin" },
   { id: "analytics",    label: "Analytics",     icon: BarChart3,     group: "Admin" },
   { id: "cms",          label: "CMS",           icon: FileText,      group: "Content" },
   { id: "legal",        label: "Legal",         icon: Scale,         group: "Content" },
@@ -430,6 +431,12 @@ export function AdminSettings() {
   const [importing, setImporting]       = useState<string | null>(null);
   const [creatingBackup, setCreatingBackup] = useState(false);
   const [restoring, setRestoring]       = useState(false);
+
+  // Migration verification state
+  type VerifyCheck = { label: string; count: number; ok: boolean; partial?: boolean; detail: string };
+  type VerifyResult = { ok: boolean; checks: Record<string, VerifyCheck>; verifiedAt: string };
+  const [verifyResult, setVerifyResult] = useState<VerifyResult | null>(null);
+  const [verifying, setVerifying]       = useState(false);
 
   const set = (key: string, val: string) => setSettings(s => ({ ...s, [key]: val }));
 
@@ -629,28 +636,54 @@ export function AdminSettings() {
   }
 
   async function doFullRestore() {
-    const file = await pickFile(".json");
+    const file = await pickFile(".zip");
     if (!file) return;
     setRestoring(true);
     try {
-      const data = await readFileAsJson(file);
-      if (!data.version) throw new Error("This doesn't appear to be a BrokerMAIL backup file.");
+      const form = new FormData();
+      form.append("file", file);
       const res = await fetch("/api/admin/restore/full", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
-        body: JSON.stringify(data),
+        headers: { Authorization: `Bearer ${token()}` },
+        body: form,
       });
       const result = await res.json();
       if (!res.ok) throw new Error(result.error ?? "Restore failed");
       const r = result.results ?? {};
       toast({
-        title: "Restore complete",
-        description: `Settings: ${r.settings ?? 0} · Users: ${r.users ?? 0} · Campaigns: ${r.campaigns ?? 0} · Templates: ${r.templates ?? 0} · Plans: ${r.plans ?? 0}`,
+        title: "Restore complete — users can log in immediately",
+        description: [
+          `Settings: ${r.settings ?? 0}`,
+          `Users: ${r.users ?? 0}`,
+          `Campaigns: ${r.campaigns ?? 0}`,
+          `Templates: ${r.templates ?? 0}`,
+          `Mailboxes: ${r.mailboxes ?? 0}`,
+          `Plans: ${r.plans ?? 0}`,
+        ].join(" · "),
       });
+      if (result.warnings?.length) {
+        result.warnings.slice(0, 3).forEach((w: string) =>
+          toast({ variant: "destructive", title: "Restore warning", description: w })
+        );
+      }
       loadSettings();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Restore failed", description: err.message });
     } finally { setRestoring(false); }
+  }
+
+  async function doMigrationVerify() {
+    setVerifying(true);
+    try {
+      const res = await fetch("/api/admin/migration/verify", {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Verification failed");
+      setVerifyResult(data);
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Verification failed", description: err.message });
+    } finally { setVerifying(false); }
   }
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
@@ -1828,11 +1861,11 @@ export function AdminSettings() {
           {activeTab === "backup" && (
             <div className="space-y-6">
               <SectionHeader icon={HardDrive} title="Backup & Restore" color="bg-green-50 text-green-600"
-                desc="Export, import, and fully restore your platform data." />
+                desc="ZIP package with 8 JSON files — includes password hashes so users log in immediately after migration." />
 
               {/* ── Full Backup / Restore ─────────────────────────────────── */}
               <div>
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Full Backup</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Full Platform Backup (ZIP)</p>
                 <div className="grid sm:grid-cols-2 gap-4">
                   <div className="p-5 rounded-2xl border border-green-200 bg-green-50 space-y-3">
                     <div className="flex items-center gap-3">
@@ -1840,15 +1873,20 @@ export function AdminSettings() {
                         <Archive className="h-5 w-5 text-green-700" />
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-900 text-sm">Create Full Backup</p>
-                        <p className="text-xs text-slate-500 mt-0.5">Users, campaigns, templates, plans & settings in one JSON file.</p>
+                        <p className="font-semibold text-slate-900 text-sm">Download Full Backup</p>
+                        <p className="text-xs text-slate-500 mt-0.5">ZIP containing users.json (with password hashes), campaigns, templates, mailboxes, branding, plans & settings.</p>
                       </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {["users.json","campaigns.json","templates.json","mailboxes.json","branding.json","plans.json","settings.json"].map(f => (
+                        <span key={f} className="px-2 py-0.5 rounded-md bg-green-100 text-green-800 text-[10px] font-mono">{f}</span>
+                      ))}
                     </div>
                     <Button className="w-full rounded-xl gap-2 bg-green-600 hover:bg-green-700 text-white"
                       disabled={creatingBackup}
                       onClick={doFullBackup}>
                       {creatingBackup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                      {creatingBackup ? "Creating Backup..." : "Download Full Backup"}
+                      {creatingBackup ? "Creating Backup..." : "Download .zip Backup"}
                     </Button>
                   </div>
 
@@ -1858,15 +1896,20 @@ export function AdminSettings() {
                         <RotateCcw className="h-5 w-5 text-amber-700" />
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-900 text-sm">Import Full Backup</p>
-                        <p className="text-xs text-slate-500 mt-0.5">Restore all data from a previously created backup JSON file.</p>
+                        <p className="font-semibold text-slate-900 text-sm">Restore from ZIP</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Upload a backup ZIP. Restores all data — password hashes included so users can log in immediately.</p>
                       </div>
+                    </div>
+                    <div className="p-2.5 rounded-lg bg-amber-100 border border-amber-200">
+                      <p className="text-[11px] text-amber-800 font-medium">✓ Password hashes restored — no reset required</p>
+                      <p className="text-[11px] text-amber-700 mt-0.5">✓ Mailbox SMTP credentials preserved</p>
+                      <p className="text-[11px] text-amber-700 mt-0.5">✓ Branding & company profiles restored</p>
                     </div>
                     <Button variant="outline" className="w-full rounded-xl gap-2 border-amber-300 text-amber-800 hover:bg-amber-100"
                       disabled={restoring}
                       onClick={doFullRestore}>
                       {restoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                      {restoring ? "Restoring..." : "Restore Backup"}
+                      {restoring ? "Restoring..." : "Upload & Restore .zip"}
                     </Button>
                   </div>
                 </div>
@@ -1932,15 +1975,121 @@ export function AdminSettings() {
                 </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 leading-relaxed">
-                <span className="font-semibold text-slate-700">Note:</span> Imports never overwrite passwords or Gmail tokens.
-                New users created via import will need to set a password via the reset flow.
-                Campaigns and templates are linked by user email during restore.
+              <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-xs text-blue-700 leading-relaxed">
+                <span className="font-semibold text-blue-900">Full ZIP backup</span> includes password hashes — users log in immediately after restore with no password reset needed.
+                Individual imports (above) do not restore passwords; new users created that way must set a password via the reset flow.
               </div>
             </div>
           )}
 
-          {/* ── 19. SUPER ADMIN PROTECTION ─────────────────────────────────── */}
+          {/* ── 19. MIGRATION VERIFICATION ─────────────────────────────────── */}
+          {activeTab === "migration" && (
+            <div className="space-y-6">
+              <SectionHeader icon={ShieldCheck} title="Migration Verification" color="bg-blue-50 text-blue-600"
+                desc="Run this after restoring a backup to verify all data migrated correctly. Use before going live on a new server or domain." />
+
+              {/* Quick actions */}
+              <div className="flex flex-wrap gap-3">
+                <Button className="gap-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
+                  disabled={verifying} onClick={doMigrationVerify}>
+                  {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  {verifying ? "Verifying..." : "Run Verification Check"}
+                </Button>
+                <Button variant="outline" className="gap-2 rounded-xl" onClick={doFullBackup} disabled={creatingBackup}>
+                  {creatingBackup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  {creatingBackup ? "Preparing..." : "Download Backup First"}
+                </Button>
+              </div>
+
+              {/* Checklist */}
+              {verifyResult ? (
+                <div className="space-y-3">
+                  <div className={`flex items-center gap-3 p-4 rounded-xl border ${verifyResult.ok ? "bg-green-50 border-green-200" : "bg-amber-50 border-amber-200"}`}>
+                    {verifyResult.ok
+                      ? <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+                      : <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0" />}
+                    <div>
+                      <p className={`font-semibold text-sm ${verifyResult.ok ? "text-green-800" : "text-amber-800"}`}>
+                        {verifyResult.ok ? "Migration verified — all checks passed" : "Some checks need attention"}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-0.5">Verified at {new Date(verifyResult.verifiedAt).toLocaleString()}</p>
+                    </div>
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {Object.entries(verifyResult.checks).map(([key, chk]) => {
+                      const isOk      = chk.ok;
+                      const isPartial = !chk.ok && (chk as any).partial;
+                      const isFail    = !chk.ok && !isPartial;
+                      return (
+                        <div key={key} className={`flex items-start gap-3 p-4 rounded-xl border ${
+                          isOk      ? "bg-green-50 border-green-200"
+                          : isPartial ? "bg-amber-50 border-amber-200"
+                          : "bg-red-50 border-red-200"
+                        }`}>
+                          <div className="mt-0.5 flex-shrink-0">
+                            {isOk
+                              ? <CheckCircle2 className="h-4 w-4 text-green-600" />
+                              : isPartial
+                              ? <AlertTriangle className="h-4 w-4 text-amber-500" />
+                              : <AlertCircle className="h-4 w-4 text-red-500" />}
+                          </div>
+                          <div>
+                            <p className={`font-semibold text-xs ${isOk ? "text-green-800" : isPartial ? "text-amber-800" : "text-red-800"}`}>
+                              {chk.label}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-0.5">{chk.detail}</p>
+                          </div>
+                          <div className="ml-auto">
+                            <span className={`text-sm font-bold tabular-nums ${isOk ? "text-green-700" : isPartial ? "text-amber-700" : "text-red-600"}`}>
+                              {chk.count}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <Button variant="outline" size="sm" className="gap-2 rounded-xl w-full" onClick={doMigrationVerify} disabled={verifying}>
+                    <RefreshCw className="h-3.5 w-3.5" /> Re-run verification
+                  </Button>
+                </div>
+              ) : (
+                <div className="p-8 rounded-2xl border-2 border-dashed border-slate-200 text-center">
+                  <ClipboardList className="h-10 w-10 text-slate-300 mx-auto mb-3" />
+                  <p className="font-semibold text-slate-600 text-sm">No verification run yet</p>
+                  <p className="text-xs text-slate-400 mt-1">Click "Run Verification Check" above to test your migration.</p>
+                </div>
+              )}
+
+              {/* Migration guide */}
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Migration Checklist</p>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 divide-y divide-slate-200">
+                  {[
+                    { step: "1", title: "Create backup on source server", desc: "Admin → Settings → Backup → Download .zip Backup" },
+                    { step: "2", title: "Install fresh BrokerMAIL on target", desc: "New Replit, VPS, or hosting provider — run database migrations" },
+                    { step: "3", title: "Restore the ZIP backup", desc: "Admin → Settings → Backup → Upload & Restore .zip" },
+                    { step: "4", title: "Run verification here", desc: "Confirm all users, hashes, templates, mailboxes, and campaigns are present" },
+                    { step: "5", title: "Test a user login", desc: "Sign in with an existing user email + original password to confirm hashes work" },
+                    { step: "6", title: "Update DNS / redirect traffic", desc: "Point your domain to the new server — users experience no disruption" },
+                  ].map(s => (
+                    <div key={s.step} className="flex items-start gap-4 p-4">
+                      <div className="h-6 w-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center flex-shrink-0 mt-0.5">
+                        {s.step}
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-800">{s.title}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{s.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 20. SUPER ADMIN PROTECTION ─────────────────────────────────── */}
           {activeTab === "superadmin" && (
             <div className="space-y-5">
               <SectionHeader icon={Lock} title="Super Admin Protection" color="bg-red-50 text-red-600"
