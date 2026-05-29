@@ -3,9 +3,11 @@ import {
   db, usersTable, campaignsTable, leadsTable, draftsTable,
   systemLogsTable, mailboxesTable, adminSettingsTable, emailQueueTable,
   plansTable, subscriptionsTable, planRequestsTable, supportTicketsTable,
+  templatesTable,
 } from "@workspace/db";
 import { count, desc, sql, eq, gte, and, or, ilike } from "drizzle-orm";
 import { requireAdmin } from "../lib/auth";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -790,6 +792,326 @@ router.get("/admin/export/settings", requireAdmin, async (_req, res): Promise<vo
   res.setHeader("Content-Type", "application/json");
   res.setHeader("Content-Disposition", `attachment; filename="settings_${new Date().toISOString().split("T")[0]}.json"`);
   res.json({ ...DEFAULT_SETTINGS, ...stored });
+});
+
+// ─── Full Backup ──────────────────────────────────────────────────────────────
+
+router.get("/admin/backup/full", requireAdmin, async (_req, res): Promise<void> => {
+  try {
+    const [users, campaigns, templates, plans, settingsRows] = await Promise.all([
+      db.select({
+        id: usersTable.id, email: usersTable.email, name: usersTable.name,
+        role: usersTable.role, plan: usersTable.plan, credits: usersTable.credits,
+        status: usersTable.status, timezone: usersTable.timezone, aiTone: usersTable.aiTone,
+        companyName: usersTable.companyName, companyTagline: usersTable.companyTagline,
+        companyWebsite: usersTable.companyWebsite, companyPhone: usersTable.companyPhone,
+        usdot: usersTable.usdot, mcNumber: usersTable.mcNumber, accentColor: usersTable.accentColor,
+        agentName: usersTable.agentName, useSignature: usersTable.useSignature,
+        createdAt: usersTable.createdAt,
+      }).from(usersTable).orderBy(usersTable.id),
+      db.select().from(campaignsTable).orderBy(campaignsTable.id),
+      db.select().from(templatesTable).orderBy(templatesTable.id),
+      db.select().from(plansTable).orderBy(plansTable.sortOrder),
+      db.select().from(adminSettingsTable),
+    ]);
+
+    const settings = Object.fromEntries(settingsRows.map(r => [r.key, r.value]));
+
+    const backup = {
+      version: "1",
+      exportedAt: new Date().toISOString(),
+      settings,
+      users: users.map(u => ({ ...u, createdAt: u.createdAt.toISOString() })),
+      campaigns: campaigns.map(c => ({
+        ...c,
+        createdAt: c.createdAt.toISOString(),
+        updatedAt: c.updatedAt.toISOString(),
+        cooldownUntil: c.cooldownUntil?.toISOString() ?? null,
+      })),
+      templates: templates.map(t => ({
+        ...t,
+        createdAt: t.createdAt.toISOString(),
+        updatedAt: t.updatedAt.toISOString(),
+      })),
+      plans: plans.map(p => ({
+        ...p,
+        createdAt: p.createdAt.toISOString(),
+        updatedAt: p.updatedAt.toISOString(),
+      })),
+    };
+
+    const date = new Date().toISOString().split("T")[0];
+    res.setHeader("Content-Type", "application/json");
+    res.setHeader("Content-Disposition", `attachment; filename="brokermail_backup_${date}.json"`);
+    res.json(backup);
+  } catch (err: any) {
+    logger.error({ err }, "Full backup error");
+    res.status(500).json({ error: err?.message ?? "Backup failed" });
+  }
+});
+
+// ─── Restore Full Backup ──────────────────────────────────────────────────────
+
+router.post("/admin/restore/full", requireAdmin, async (req, res): Promise<void> => {
+  const backup = req.body as {
+    version?: string;
+    settings?: Record<string, string>;
+    users?: Record<string, any>[];
+    campaigns?: Record<string, any>[];
+    templates?: Record<string, any>[];
+    plans?: Record<string, any>[];
+  };
+
+  if (!backup || typeof backup !== "object") {
+    res.status(400).json({ error: "Invalid backup file." }); return;
+  }
+
+  const results: Record<string, number> = {
+    settings: 0, users: 0, campaigns: 0, templates: 0, plans: 0,
+  };
+
+  try {
+    // 1. Restore settings
+    if (backup.settings && typeof backup.settings === "object") {
+      for (const [key, value] of Object.entries(backup.settings)) {
+        await db.insert(adminSettingsTable).values({ key, value })
+          .onConflictDoUpdate({ target: adminSettingsTable.key, set: { value } });
+        results.settings++;
+      }
+    }
+
+    // 2. Restore plans (upsert by slug)
+    if (Array.isArray(backup.plans)) {
+      for (const p of backup.plans) {
+        if (!p.slug || !p.name) continue;
+        await db.insert(plansTable).values({
+          name: p.name, slug: p.slug, description: p.description ?? null,
+          monthlyEmailLimit: p.monthlyEmailLimit ?? 100,
+          smtpAccountsLimit: p.smtpAccountsLimit ?? 1,
+          campaignsLimit: p.campaignsLimit ?? 5,
+          batchSendLimit: p.batchSendLimit ?? 50,
+          features: p.features ?? [],
+          sortOrder: p.sortOrder ?? 0,
+          isActive: p.isActive ?? true,
+        }).onConflictDoUpdate({
+          target: plansTable.slug,
+          set: {
+            name: p.name, description: p.description ?? null,
+            monthlyEmailLimit: p.monthlyEmailLimit ?? 100,
+            smtpAccountsLimit: p.smtpAccountsLimit ?? 1,
+            campaignsLimit: p.campaignsLimit ?? 5,
+            batchSendLimit: p.batchSendLimit ?? 50,
+            features: p.features ?? [],
+          },
+        });
+        results.plans++;
+      }
+    }
+
+    // 3. Restore users (upsert by email, never overwrite passwordHash or Gmail tokens)
+    const emailToNewId = new Map<string, number>();
+    if (Array.isArray(backup.users)) {
+      for (const u of backup.users) {
+        if (!u.email) continue;
+        const [existing] = await db.select({ id: usersTable.id })
+          .from(usersTable).where(eq(usersTable.email, u.email));
+        if (existing) {
+          await db.update(usersTable).set({
+            name: u.name ?? existing.id.toString(),
+            role: u.role ?? "user",
+            plan: u.plan ?? "free",
+            credits: u.credits ?? 0,
+            status: u.status ?? "active",
+            timezone: u.timezone ?? "UTC",
+            companyName: u.companyName ?? null,
+            companyTagline: u.companyTagline ?? null,
+            companyWebsite: u.companyWebsite ?? null,
+            companyPhone: u.companyPhone ?? null,
+            usdot: u.usdot ?? null,
+            mcNumber: u.mcNumber ?? null,
+            accentColor: u.accentColor ?? null,
+            agentName: u.agentName ?? null,
+            updatedAt: new Date(),
+          }).where(eq(usersTable.id, existing.id));
+          emailToNewId.set(u.email, existing.id);
+        } else {
+          const [inserted] = await db.insert(usersTable).values({
+            email: u.email, name: u.name ?? u.email,
+            role: u.role ?? "user", plan: u.plan ?? "free",
+            credits: u.credits ?? 0, status: u.status ?? "active",
+            timezone: u.timezone ?? "UTC",
+            companyName: u.companyName ?? null,
+            companyTagline: u.companyTagline ?? null,
+            companyWebsite: u.companyWebsite ?? null,
+            companyPhone: u.companyPhone ?? null,
+          }).returning({ id: usersTable.id });
+          emailToNewId.set(u.email, inserted.id);
+        }
+        results.users++;
+      }
+    }
+
+    // Build old-id → new-id map for users
+    const oldIdToNewId = new Map<number, number>();
+    if (Array.isArray(backup.users)) {
+      for (const u of backup.users) {
+        if (u.id != null && u.email && emailToNewId.has(u.email)) {
+          oldIdToNewId.set(u.id, emailToNewId.get(u.email)!);
+        }
+      }
+    }
+
+    // 4. Restore templates
+    if (Array.isArray(backup.templates)) {
+      for (const t of backup.templates) {
+        if (!t.name || !t.subject || !t.body) continue;
+        const mappedUserId = oldIdToNewId.get(t.userId);
+        if (!mappedUserId) continue;
+        const [existing] = await db.select({ id: templatesTable.id })
+          .from(templatesTable)
+          .where(and(eq(templatesTable.userId, mappedUserId), eq(templatesTable.name, t.name)));
+        if (!existing) {
+          await db.insert(templatesTable).values({
+            userId: mappedUserId, name: t.name, subject: t.subject,
+            body: t.body, isDefault: t.isDefault ?? false,
+          });
+          results.templates++;
+        }
+      }
+    }
+
+    // 5. Restore campaigns
+    if (Array.isArray(backup.campaigns)) {
+      for (const c of backup.campaigns) {
+        if (!c.name) continue;
+        const mappedUserId = oldIdToNewId.get(c.userId);
+        if (!mappedUserId) continue;
+        const [existing] = await db.select({ id: campaignsTable.id })
+          .from(campaignsTable)
+          .where(and(eq(campaignsTable.userId, mappedUserId), eq(campaignsTable.name, c.name)));
+        if (!existing) {
+          await db.insert(campaignsTable).values({
+            userId: mappedUserId, name: c.name,
+            status: "pending",
+            sendMode: c.sendMode ?? "gmail",
+            emailStyle: c.emailStyle ?? "clean",
+            useSignature: c.useSignature ?? false,
+            totalLeads: 0, draftedCount: 0, failedCount: 0, sentCount: 0,
+          });
+          results.campaigns++;
+        }
+      }
+    }
+
+    logger.info({ results }, "Full backup restored");
+    res.json({ success: true, message: "Backup restored successfully.", results });
+  } catch (err: any) {
+    logger.error({ err }, "Restore backup error");
+    res.status(500).json({ error: err?.message ?? "Restore failed" });
+  }
+});
+
+// ─── Import Users ─────────────────────────────────────────────────────────────
+
+router.post("/admin/import/users", requireAdmin, async (req, res): Promise<void> => {
+  const users = req.body as Record<string, any>[];
+  if (!Array.isArray(users)) { res.status(400).json({ error: "Expected a JSON array of users." }); return; }
+
+  let imported = 0, skipped = 0;
+  try {
+    for (const u of users) {
+      if (!u.email) { skipped++; continue; }
+      const [existing] = await db.select({ id: usersTable.id })
+        .from(usersTable).where(eq(usersTable.email, u.email));
+      if (existing) {
+        await db.update(usersTable).set({
+          name: u.name ?? undefined,
+          role: u.role ?? undefined,
+          plan: u.plan ?? undefined,
+          credits: u.credits ?? undefined,
+          status: u.status ?? undefined,
+          updatedAt: new Date(),
+        }).where(eq(usersTable.id, existing.id));
+        imported++;
+      } else {
+        await db.insert(usersTable).values({
+          email: u.email, name: u.name ?? u.email,
+          role: u.role ?? "user", plan: u.plan ?? "free",
+          credits: u.credits ?? 0, status: u.status ?? "active",
+          timezone: u.timezone ?? "UTC",
+        });
+        imported++;
+      }
+    }
+    res.json({ success: true, message: `${imported} users imported, ${skipped} skipped.`, imported, skipped });
+  } catch (err: any) {
+    logger.error({ err }, "Import users error");
+    res.status(500).json({ error: err?.message ?? "Import failed" });
+  }
+});
+
+// ─── Import Campaigns ─────────────────────────────────────────────────────────
+
+router.post("/admin/import/campaigns", requireAdmin, async (req, res): Promise<void> => {
+  const { campaigns, targetUserId } = req.body as {
+    campaigns: Record<string, any>[];
+    targetUserId?: number;
+  };
+  if (!Array.isArray(campaigns)) { res.status(400).json({ error: "Expected { campaigns: [...] }." }); return; }
+
+  let imported = 0, skipped = 0;
+  try {
+    for (const c of campaigns) {
+      if (!c.name) { skipped++; continue; }
+      const userId = targetUserId ?? c.userId;
+      if (!userId) { skipped++; continue; }
+      const [userExists] = await db.select({ id: usersTable.id })
+        .from(usersTable).where(eq(usersTable.id, userId));
+      if (!userExists) { skipped++; continue; }
+
+      const [existing] = await db.select({ id: campaignsTable.id })
+        .from(campaignsTable)
+        .where(and(eq(campaignsTable.userId, userId), eq(campaignsTable.name, c.name)));
+      if (existing) { skipped++; continue; }
+
+      await db.insert(campaignsTable).values({
+        userId, name: c.name,
+        status: "pending",
+        sendMode: c.sendMode ?? "gmail",
+        emailStyle: c.emailStyle ?? "clean",
+        useSignature: c.useSignature ?? false,
+        totalLeads: 0, draftedCount: 0, failedCount: 0, sentCount: 0,
+      });
+      imported++;
+    }
+    res.json({ success: true, message: `${imported} campaigns imported, ${skipped} skipped.`, imported, skipped });
+  } catch (err: any) {
+    logger.error({ err }, "Import campaigns error");
+    res.status(500).json({ error: err?.message ?? "Import failed" });
+  }
+});
+
+// ─── Import Settings ──────────────────────────────────────────────────────────
+
+router.post("/admin/import/settings", requireAdmin, async (req, res): Promise<void> => {
+  const settings = req.body as Record<string, string>;
+  if (typeof settings !== "object" || Array.isArray(settings)) {
+    res.status(400).json({ error: "Expected a JSON object of settings." }); return;
+  }
+
+  let imported = 0;
+  try {
+    for (const [key, value] of Object.entries(settings)) {
+      if (typeof value !== "string") continue;
+      await db.insert(adminSettingsTable).values({ key, value })
+        .onConflictDoUpdate({ target: adminSettingsTable.key, set: { value } });
+      imported++;
+    }
+    res.json({ success: true, message: `${imported} settings imported.`, imported });
+  } catch (err: any) {
+    logger.error({ err }, "Import settings error");
+    res.status(500).json({ error: err?.message ?? "Import failed" });
+  }
 });
 
 // ─── Audit log: all admin actions ────────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
   ToggleLeft, Sliders, Lock, HelpCircle, Download, Bell,
   Coins, MailCheck, Trash2, MessageSquare, Send, Reply,
   UserCheck, Zap, Scale, PlusCircle, MinusCircle, X,
+  Upload, RotateCcw, Archive, HardDrive,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -424,8 +425,11 @@ export function AdminSettings() {
   const [creditTargetId, setCreditTargetId] = useState<number | null>(null);
   const [creditAdjusting, setCreditAdjusting] = useState(false);
 
-  // Backup/export state
-  const [exporting, setExporting] = useState<string | null>(null);
+  // Backup/export/import state
+  const [exporting, setExporting]       = useState<string | null>(null);
+  const [importing, setImporting]       = useState<string | null>(null);
+  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [restoring, setRestoring]       = useState(false);
 
   const set = (key: string, val: string) => setSettings(s => ({ ...s, [key]: val }));
 
@@ -559,6 +563,94 @@ export function AdminSettings() {
     } catch (err: any) {
       toast({ variant: "destructive", title: "Export failed", description: err.message });
     } finally { setExporting(null); }
+  }
+
+  function pickFile(accept: string): Promise<File | null> {
+    return new Promise(resolve => {
+      const input = document.createElement("input");
+      input.type = "file"; input.accept = accept;
+      input.onchange = () => resolve(input.files?.[0] ?? null);
+      input.oncancel = () => resolve(null);
+      input.click();
+    });
+  }
+
+  async function readFileAsJson(file: File): Promise<any> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try { resolve(JSON.parse(e.target?.result as string)); }
+        catch { reject(new Error("Invalid JSON file — could not parse.")); }
+      };
+      reader.onerror = () => reject(new Error("Failed to read file."));
+      reader.readAsText(file);
+    });
+  }
+
+  async function doImport(type: string) {
+    const file = await pickFile(".json");
+    if (!file) return;
+    setImporting(type);
+    try {
+      const data = await readFileAsJson(file);
+      const body = type === "campaigns"
+        ? JSON.stringify({ campaigns: Array.isArray(data) ? data : data.campaigns ?? [] })
+        : JSON.stringify(Array.isArray(data) ? data : (type === "users" ? data.users ?? data : data));
+      const res = await fetch(`/api/admin/import/${type}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+        body,
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error ?? "Import failed");
+      toast({ title: "Import complete", description: result.message });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Import failed", description: err.message });
+    } finally { setImporting(null); }
+  }
+
+  async function doFullBackup() {
+    setCreatingBackup(true);
+    try {
+      const res = await fetch("/api/admin/backup/full", {
+        headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (!res.ok) throw new Error("Backup failed");
+      const blob = await res.blob();
+      const date = new Date().toISOString().split("T")[0];
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `brokermail_backup_${date}.json`;
+      a.click(); URL.revokeObjectURL(url);
+      toast({ title: "Full backup ready", description: "All data exported to JSON." });
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Backup failed", description: err.message });
+    } finally { setCreatingBackup(false); }
+  }
+
+  async function doFullRestore() {
+    const file = await pickFile(".json");
+    if (!file) return;
+    setRestoring(true);
+    try {
+      const data = await readFileAsJson(file);
+      if (!data.version) throw new Error("This doesn't appear to be a BrokerMAIL backup file.");
+      const res = await fetch("/api/admin/restore/full", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error ?? "Restore failed");
+      const r = result.results ?? {};
+      toast({
+        title: "Restore complete",
+        description: `Settings: ${r.settings ?? 0} · Users: ${r.users ?? 0} · Campaigns: ${r.campaigns ?? 0} · Templates: ${r.templates ?? 0} · Plans: ${r.plans ?? 0}`,
+      });
+      loadSettings();
+    } catch (err: any) {
+      toast({ variant: "destructive", title: "Restore failed", description: err.message });
+    } finally { setRestoring(false); }
   }
 
   useEffect(() => { loadSettings(); }, [loadSettings]);
@@ -1734,42 +1826,116 @@ export function AdminSettings() {
 
           {/* ── 18. BACKUP & EXPORT ────────────────────────────────────────── */}
           {activeTab === "backup" && (
-            <div className="space-y-5">
-              <SectionHeader icon={Download} title="Backup & Export" color="bg-green-50 text-green-600"
-                desc="Download exports of your platform data as CSV or JSON files." />
+            <div className="space-y-6">
+              <SectionHeader icon={HardDrive} title="Backup & Restore" color="bg-green-50 text-green-600"
+                desc="Export, import, and fully restore your platform data." />
 
-              <div className="grid sm:grid-cols-2 gap-4">
-                {[
-                  { type: "users",     label: "Export Users",     desc: "All user accounts with plan, credits, and status. CSV format.", icon: Users },
-                  { type: "campaigns", label: "Export Campaigns", desc: "All campaigns with status and metadata. CSV format.", icon: Mail },
-                  { type: "settings",  label: "Export Settings",  desc: "All current platform settings snapshot. JSON format.", icon: Database },
-                ].map(e => (
-                  <div key={e.type} className="p-5 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+              {/* ── Full Backup / Restore ─────────────────────────────────── */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Full Backup</p>
+                <div className="grid sm:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-2xl border border-green-200 bg-green-50 space-y-3">
                     <div className="flex items-center gap-3">
                       <div className="h-10 w-10 rounded-xl bg-green-100 flex items-center justify-center">
-                        <e.icon className="h-5 w-5 text-green-700" />
+                        <Archive className="h-5 w-5 text-green-700" />
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-900 text-sm">{e.label}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">{e.desc}</p>
+                        <p className="font-semibold text-slate-900 text-sm">Create Full Backup</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Users, campaigns, templates, plans & settings in one JSON file.</p>
                       </div>
                     </div>
-                    <Button variant="outline" className="w-full rounded-xl gap-2"
-                      disabled={exporting === e.type}
-                      onClick={() => doExport(e.type)}>
-                      {exporting === e.type ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                      {exporting === e.type ? "Exporting..." : `Download ${e.label.split(" ")[1]}`}
+                    <Button className="w-full rounded-xl gap-2 bg-green-600 hover:bg-green-700 text-white"
+                      disabled={creatingBackup}
+                      onClick={doFullBackup}>
+                      {creatingBackup ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                      {creatingBackup ? "Creating Backup..." : "Download Full Backup"}
                     </Button>
                   </div>
-                ))}
+
+                  <div className="p-5 rounded-2xl border border-amber-200 bg-amber-50 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <div className="h-10 w-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                        <RotateCcw className="h-5 w-5 text-amber-700" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-900 text-sm">Import Full Backup</p>
+                        <p className="text-xs text-slate-500 mt-0.5">Restore all data from a previously created backup JSON file.</p>
+                      </div>
+                    </div>
+                    <Button variant="outline" className="w-full rounded-xl gap-2 border-amber-300 text-amber-800 hover:bg-amber-100"
+                      disabled={restoring}
+                      onClick={doFullRestore}>
+                      {restoring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      {restoring ? "Restoring..." : "Restore Backup"}
+                    </Button>
+                  </div>
+                </div>
               </div>
 
-              <div className="p-4 rounded-xl bg-blue-50 border border-blue-100">
-                <p className="text-xs font-semibold text-blue-800 mb-1">Database Backup</p>
-                <p className="text-xs text-blue-700">
-                  For full database backups, use your Replit PostgreSQL dashboard or connect with pg_dump.
-                  Exports above are for platform-level data portability.
-                </p>
+              {/* ── Export Individual ─────────────────────────────────────── */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Export Individual Data</p>
+                <div className="grid sm:grid-cols-3 gap-4">
+                  {[
+                    { type: "users",     label: "Export Users",     desc: "All user accounts. CSV format.", icon: Users },
+                    { type: "campaigns", label: "Export Campaigns", desc: "All campaigns & metadata. CSV format.", icon: Mail },
+                    { type: "settings",  label: "Export Settings",  desc: "Platform settings snapshot. JSON format.", icon: Database },
+                  ].map(e => (
+                    <div key={e.type} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                          <e.icon className="h-4 w-4 text-blue-700" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-900 text-xs">{e.label}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{e.desc}</p>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" className="w-full rounded-xl gap-2"
+                        disabled={exporting === e.type}
+                        onClick={() => doExport(e.type)}>
+                        {exporting === e.type ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                        {exporting === e.type ? "Exporting..." : "Download"}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* ── Import Individual ─────────────────────────────────────── */}
+              <div>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Import Individual Data</p>
+                <div className="grid sm:grid-cols-3 gap-4">
+                  {[
+                    { type: "users",     label: "Import Users",     desc: "JSON array of user objects. Upserts by email.", icon: Users,    color: "bg-purple-100 text-purple-700" },
+                    { type: "campaigns", label: "Import Campaigns", desc: "JSON array of campaigns. Skips duplicates.", icon: Mail,     color: "bg-indigo-100 text-indigo-700" },
+                    { type: "settings",  label: "Import Settings",  desc: "JSON settings object. Overwrites existing keys.", icon: Database, color: "bg-teal-100 text-teal-700"   },
+                  ].map(e => (
+                    <div key={e.type} className="p-4 rounded-2xl border border-slate-200 bg-slate-50 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-8 w-8 rounded-lg flex items-center justify-center flex-shrink-0 ${e.color}`}>
+                          <e.icon className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-slate-900 text-xs">{e.label}</p>
+                          <p className="text-xs text-slate-400 mt-0.5">{e.desc}</p>
+                        </div>
+                      </div>
+                      <Button variant="outline" size="sm" className="w-full rounded-xl gap-2"
+                        disabled={importing === e.type}
+                        onClick={() => doImport(e.type)}>
+                        {importing === e.type ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+                        {importing === e.type ? "Importing..." : "Upload JSON"}
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-500 leading-relaxed">
+                <span className="font-semibold text-slate-700">Note:</span> Imports never overwrite passwords or Gmail tokens.
+                New users created via import will need to set a password via the reset flow.
+                Campaigns and templates are linked by user email during restore.
               </div>
             </div>
           )}
