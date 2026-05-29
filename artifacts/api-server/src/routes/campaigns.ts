@@ -1058,7 +1058,25 @@ router.post("/campaigns/:id/send-batch", requireAuth, async (req, res): Promise<
       return;
     }
 
-    await db.insert(emailQueueTable).values(entries);
+    try {
+      await db.insert(emailQueueTable).values(entries);
+    } catch (insertErr: any) {
+      const pg = insertErr?.cause ?? insertErr;
+      logger.error({
+        tag: "[QUEUE INSERT FAILED]",
+        campaignId, mailboxId: box.id, templateId: template.id,
+        entryCount: entries.length,
+        sampleEntry: entries[0],
+        pgMessage:    pg?.message,
+        pgCode:       pg?.code,
+        pgDetail:     pg?.detail,
+        pgConstraint: pg?.constraint,
+        pgColumn:     pg?.column,
+        pgTable:      pg?.table,
+        rawError:     String(pg),
+      }, `[QUEUE INSERT FAILED] campaignId=${campaignId} pgCode=${pg?.code} pgConstraint=${pg?.constraint} pgDetail=${pg?.detail} pgMessage=${pg?.message}`);
+      throw insertErr;
+    }
 
     // Create batch record
     await db.insert(campaignBatchesTable).values({
@@ -1265,7 +1283,26 @@ router.post("/campaigns/:id/start-campaign", requireAuth, async (req, res): Prom
 
       if (entries.length > 0) {
         for (let i = 0; i < entries.length; i += 500) {
-          await db.insert(emailQueueTable).values(entries.slice(i, i + 500));
+          const batch = entries.slice(i, i + 500);
+          try {
+            await db.insert(emailQueueTable).values(batch);
+          } catch (insertErr: any) {
+            const pg = insertErr?.cause ?? insertErr;
+            logger.error({
+              tag: "[QUEUE INSERT FAILED]",
+              campaignId, mailboxId: box.id, templateId: template.id,
+              batchStart: i, batchSize: batch.length,
+              sampleEntry: batch[0],
+              pgMessage:    pg?.message,
+              pgCode:       pg?.code,
+              pgDetail:     pg?.detail,
+              pgConstraint: pg?.constraint,
+              pgColumn:     pg?.column,
+              pgTable:      pg?.table,
+              rawError:     String(pg),
+            }, `[QUEUE INSERT FAILED] campaignId=${campaignId} batchStart=${i} pgCode=${pg?.code} pgConstraint=${pg?.constraint} pgDetail=${pg?.detail} pgMessage=${pg?.message}`);
+            throw insertErr;
+          }
         }
         const leadIds = newLeads.map(l => l.id);
         for (let i = 0; i < leadIds.length; i += 500) {
@@ -1299,8 +1336,35 @@ router.post("/campaigns/:id/start-campaign", requireAuth, async (req, res): Prom
       hourlyLimit: box.maxPerHour ?? 100,
     });
   } catch (err: any) {
-    logger.error({ err, campaignId, userId: user.id }, `Start campaign error: ${err?.message}`);
-    res.status(500).json({ success: false, error: err?.message ?? "Failed to start campaign" });
+    // Drizzle wraps the real PG error in err.cause — extract it for a useful message
+    const pg = err?.cause ?? err;
+    const pgMessage    = pg?.message;
+    const pgCode       = pg?.code;
+    const pgDetail     = pg?.detail;
+    const pgConstraint = pg?.constraint;
+    const pgColumn     = pg?.column;
+    const pgTable      = pg?.table;
+
+    // Build a human-readable error: prefer PG message over Drizzle's SQL dump
+    const userMessage = pgMessage && !pgMessage.startsWith("Failed query")
+      ? pgMessage
+      : (err?.message?.startsWith("Failed query") ? "Database insert failed" : (err?.message ?? "Failed to start campaign"));
+
+    logger.error({
+      campaignId, userId: user.id,
+      pgMessage, pgCode, pgDetail, pgConstraint, pgColumn, pgTable,
+      drizzleMessage: err?.message?.slice(0, 300),
+    }, `[START-CAMPAIGN ERROR] campaignId=${campaignId} pgCode=${pgCode} pgConstraint=${pgConstraint} pgMessage=${pgMessage}`);
+
+    res.status(500).json({
+      success: false,
+      error:        userMessage,
+      pgCode,
+      pgDetail,
+      pgConstraint,
+      pgColumn,
+      pgTable,
+    });
   }
 });
 
@@ -1760,6 +1824,110 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
     opensTimeline, mostEngaged,
     sendMode: campaign.sendMode,
   });
+});
+
+// ─── GET /api/campaigns/:id/start-diagnostics ────────────────────────────────
+/**
+ * Returns a full pre-flight diagnostic payload so you can see exactly what
+ * values would be inserted into email_queue on the next campaign start.
+ */
+router.get("/campaigns/:id/start-diagnostics", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  try {
+    const [campaign] = await db.select().from(campaignsTable)
+      .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+
+    const [template] = campaign?.templateId
+      ? await db.select().from(templatesTable)
+          .where(and(eq(templatesTable.id, campaign.templateId), eq(templatesTable.userId, user.id)))
+      : [null];
+
+    const [box] = await db.select().from(mailboxesTable)
+      .where(and(eq(mailboxesTable.userId, user.id), eq(mailboxesTable.isActive, true)));
+
+    const sampleLeads = await db.select().from(leadsTable)
+      .where(and(eq(leadsTable.campaignId, campaignId), eq(leadsTable.status, "new")))
+      .orderBy(leadsTable.id)
+      .limit(3);
+
+    const [newLeadCount] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(leadsTable)
+      .where(and(eq(leadsTable.campaignId, campaignId), eq(leadsTable.status, "new")));
+
+    const [queueCount] = await db.select({ count: sql<number>`count(*)::int` })
+      .from(emailQueueTable)
+      .where(and(eq(emailQueueTable.campaignId, campaignId)));
+
+    // Build a sample insert payload for one lead
+    let sampleInsertPayload: object | null = null;
+    if (box && template && sampleLeads.length > 0) {
+      const lead = sampleLeads[0];
+      const row: Record<string, string> = {
+        name: lead.name ?? "", email: lead.email,
+        vehicle: lead.vehicle ?? "", route: lead.route ?? "",
+        pickup: lead.pickup ?? "", delivery: lead.delivery ?? "",
+        price: lead.price ?? "", notes: lead.notes ?? "",
+        quote_id: lead.quoteId ?? "",
+      };
+      const emailStyle = (["clean", "modern", "minimal", "luxury"] as const).includes(campaign?.emailStyle as any)
+        ? campaign?.emailStyle as any : "clean";
+      sampleInsertPayload = {
+        jobId:              "(would be a new UUID on start)",
+        userId:             user.id,
+        mailboxId:          box.id,
+        templateId:         template.id,
+        campaignId,
+        leadId:             lead.id,
+        email:              lead.email,
+        subject:            replaceVarsText(template.subject, row),
+        rowDataJson:        JSON.stringify(row),
+        style:              emailStyle,
+        useSignatureBuilder: campaign?.useSignature ?? false,
+        quoteId:            lead.quoteId ?? null,
+        status:             "pending",
+      };
+    }
+
+    // Validation checks
+    const issues: string[] = [];
+    if (!campaign)  issues.push("Campaign not found or not owned by this user");
+    if (!template)  issues.push(campaign ? "No template assigned to campaign" : "Template lookup skipped");
+    if (!box)       issues.push("No active SMTP mailbox found for this user");
+    if ((newLeadCount?.count ?? 0) === 0) issues.push("No leads with status=new in this campaign");
+    if (campaign?.sendMode !== "smtp") issues.push(`sendMode is '${campaign?.sendMode}' — must be 'smtp'`);
+
+    res.json({
+      ok: issues.length === 0,
+      issues,
+      campaign: campaign ? {
+        id: campaign.id, name: campaign.name, status: campaign.status,
+        sendMode: campaign.sendMode, templateId: campaign.templateId,
+        emailStyle: campaign.emailStyle, useSignature: campaign.useSignature,
+      } : null,
+      template: template ? {
+        id: template.id, name: template.name,
+        subjectLength: template.subject?.length,
+        bodyLength: template.body?.length,
+      } : null,
+      mailbox: box ? {
+        id: box.id, smtpUser: box.smtpUser, smtpHost: box.smtpHost,
+        smtpPort: box.smtpPort, isActive: box.isActive,
+        delaySeconds: box.delaySeconds, maxPerHour: box.maxPerHour,
+      } : null,
+      leads: {
+        newCount: newLeadCount?.count ?? 0,
+        sampleEmails: sampleLeads.map(l => ({ id: l.id, email: l.email, status: l.status })),
+      },
+      existingQueueCount: queueCount?.count ?? 0,
+      sampleInsertPayload,
+    });
+  } catch (err: any) {
+    const pg = err?.cause ?? err;
+    res.status(500).json({ error: pg?.message ?? err?.message, pgCode: pg?.code });
+  }
 });
 
 export default router;

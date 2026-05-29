@@ -302,7 +302,15 @@ export default function CampaignDetail() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       });
       const data = await safeJson(res);
-      if (!res.ok) throw new Error(data.error ?? "Failed to start campaign");
+      if (!res.ok) {
+        // Build detailed error message from PG fields if available
+        const parts: string[] = [];
+        if (data.error)        parts.push(data.error);
+        if (data.pgDetail)     parts.push(`Detail: ${data.pgDetail}`);
+        if (data.pgConstraint) parts.push(`Constraint: ${data.pgConstraint}`);
+        if (data.pgCode)       parts.push(`PG code: ${data.pgCode}`);
+        throw new Error(parts.join(" | ") || "Failed to start campaign");
+      }
       toast({
         title: "Campaign started",
         description: `Sending ${data.total} emails automatically with ${data.delaySeconds}s delay.`,
