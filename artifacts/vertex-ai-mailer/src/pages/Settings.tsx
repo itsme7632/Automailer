@@ -339,7 +339,7 @@ export default function Settings() {
                 <label className="text-sm font-medium flex items-center gap-1.5">
                   <Building2 className="h-3.5 w-3.5 text-muted-foreground" /> Company Name
                 </label>
-                <Input value={branding.companyName} onChange={e => setBranding(b => ({ ...b, companyName: e.target.value }))} placeholder="e.g. NSLA Carship" className="rounded-xl" />
+                <Input value={branding.companyName} onChange={e => setBranding(b => ({ ...b, companyName: e.target.value }))} placeholder="e.g. Your Company Name" className="rounded-xl" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium flex items-center gap-1.5">
@@ -351,7 +351,7 @@ export default function Settings() {
                 <label className="text-sm font-medium flex items-center gap-1.5">
                   <Globe className="h-3.5 w-3.5 text-muted-foreground" /> Website
                 </label>
-                <Input value={branding.companyWebsite} onChange={e => setBranding(b => ({ ...b, companyWebsite: e.target.value }))} placeholder="e.g. nslacarship.com" className="rounded-xl" />
+                <Input value={branding.companyWebsite} onChange={e => setBranding(b => ({ ...b, companyWebsite: e.target.value }))} placeholder="e.g. www.yourcompany.com" className="rounded-xl" />
               </div>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium flex items-center gap-1.5">

@@ -174,9 +174,9 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex flex-col h-full bg-white border-r border-slate-200 w-60">
       {/* Logo */}
-      <div className="h-14 flex items-center px-5 border-b border-slate-100 flex-shrink-0">
+      <div className="h-24 flex items-center px-5 border-b border-slate-100 flex-shrink-0">
         <Link href="/dashboard" className="flex items-center flex-1 min-w-0">
-          <img src="/logo-horizontal.png" alt="BrokerMail AI" className="h-8 w-auto object-contain" style={{ maxWidth: "152px" }} />
+          <img src="/logo-horizontal.png" alt="BrokerMail AI" className="h-16 w-auto object-contain" style={{ maxWidth: "200px" }} />
         </Link>
         {onClose && (
           <button onClick={onClose} className="ml-2 p-1.5 rounded hover:bg-slate-100 text-slate-400 flex-shrink-0">
@@ -229,7 +229,7 @@ function TopHeader({ onMobileMenuClick }: { onMobileMenuClick: () => void }) {
           <Menu className="h-5 w-5" />
         </button>
         <Link href="/dashboard">
-          <img src="/logo-horizontal.png" alt="BrokerMail AI" className="h-7 w-auto object-contain" style={{ maxWidth: "130px" }} />
+          <img src="/logo-horizontal.png" alt="BrokerMail AI" className="h-10 w-auto object-contain" style={{ maxWidth: "160px" }} />
         </Link>
       </div>
 

@@ -590,7 +590,7 @@ export default function MailboxSettings() {
           </div>
           <div className="p-6 grid sm:grid-cols-2 gap-4">
             <Field label="From Name" icon={User} value={form.fromName}
-              onChange={v => set("fromName", v)} placeholder="NSLA Carship Sales" />
+              onChange={v => set("fromName", v)} placeholder="e.g. Your Company Name" />
             <Field label="Reply-To Email" icon={Mail} value={form.replyTo}
               onChange={v => set("replyTo", v)} placeholder="sales@yourcompany.com" />
           </div>

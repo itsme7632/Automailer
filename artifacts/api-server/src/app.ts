@@ -4,8 +4,9 @@ import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
-import { db, usersTable, plansTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { db, usersTable, plansTable, campaignsTable, emailQueueTable, leadsTable } from "@workspace/db";
+import { eq, and, inArray, isNotNull } from "drizzle-orm";
+import { processCampaignFully } from "./routes/campaigns";
 import { hashPassword } from "./lib/auth";
 import { maintenanceMiddleware } from "./lib/maintenance";
 
@@ -125,5 +126,63 @@ async function seedPlans(): Promise<void> {
 }
 
 seedPlans().catch((err) => logger.warn({ err }, "Plan seed skipped (non-fatal)"));
+
+// ---------------------------------------------------------------------------
+// Startup recovery — auto-restart processors for campaigns stuck in 'sending'
+// Handles: server restarts, deployments, Replit reboots, process crashes
+// ---------------------------------------------------------------------------
+async function startupRecovery(): Promise<void> {
+  try {
+    // Give DB a moment to be ready after boot
+    await new Promise(r => setTimeout(r, 2_000));
+
+    const sendingCampaigns = await db
+      .select({ id: campaignsTable.id })
+      .from(campaignsTable)
+      .where(eq(campaignsTable.status, "sending"));
+
+    if (sendingCampaigns.length === 0) return;
+
+    logger.info({ count: sendingCampaigns.length }, "[RECOVERY] Campaign found — campaigns in 'sending' status detected on startup");
+
+    for (const { id: campaignId } of sendingCampaigns) {
+      // Find deferred queue items for this campaign
+      const deferredItems = await db
+        .select({ leadId: emailQueueTable.leadId })
+        .from(emailQueueTable)
+        .where(and(
+          eq(emailQueueTable.campaignId, campaignId),
+          eq(emailQueueTable.status, "deferred"),
+          isNotNull(emailQueueTable.leadId),
+        ));
+
+      if (deferredItems.length > 0) {
+        logger.info({ campaignId, count: deferredItems.length }, "[RECOVERY] Deferred items found");
+        // Reset any leads stuck in 'sending' because the processor died mid-send
+        const leadIds = deferredItems.map(i => i.leadId).filter((id): id is number => id != null);
+        if (leadIds.length > 0) {
+          const fixed = await db
+            .update(leadsTable)
+            .set({ status: "queued", updatedAt: new Date() })
+            .where(and(inArray(leadsTable.id, leadIds), eq(leadsTable.status, "sending")))
+            .returning({ id: leadsTable.id });
+          if (fixed.length > 0) {
+            logger.info({ campaignId, count: fixed.length }, "[RECOVERY] Reset leads stuck in 'sending' → 'queued'");
+          }
+        }
+      }
+
+      // Kick off the processor — it handles its own stuck-item recovery internally
+      logger.info({ campaignId }, "[RECOVERY] Processor restarted");
+      processCampaignFully(campaignId).catch(err =>
+        logger.error({ err, campaignId }, "[RECOVERY] Processor error after restart")
+      );
+    }
+  } catch (err) {
+    logger.warn({ err }, "[RECOVERY] Startup recovery skipped (non-fatal)");
+  }
+}
+
+startupRecovery().catch(() => {});
 
 export default app;
