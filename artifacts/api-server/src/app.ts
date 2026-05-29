@@ -1,4 +1,4 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -32,6 +32,29 @@ app.use(cookieParser());
 
 app.use(maintenanceMiddleware);
 app.use("/api", router);
+
+// ─── Global JSON error handler ────────────────────────────────────────────────
+// Must be registered AFTER all routes. Catches any unhandled error thrown from
+// async route handlers (Express 5 forwards them automatically) and ensures the
+// response is always JSON — never the default Express HTML error page.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const status =
+    typeof (err as any)?.status === "number" ? (err as any).status :
+    typeof (err as any)?.statusCode === "number" ? (err as any).statusCode : 500;
+
+  const message =
+    (err as any)?.message ?? "An unexpected error occurred";
+
+  logger.error(
+    { err, method: req.method, url: req.url },
+    `Unhandled route error: ${message}`,
+  );
+
+  if (!res.headersSent) {
+    res.status(status).json({ success: false, error: message });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Idempotent admin seed — creates default admin account on first boot

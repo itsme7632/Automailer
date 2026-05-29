@@ -241,6 +241,15 @@ export default function CampaignDetail() {
   }
 
   // ─── SMTP: fully automated start / pause / resume / cancel ──────────────────
+  async function safeJson(res: Response): Promise<any> {
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("application/json")) {
+      const text = await res.text();
+      throw new Error(`Server returned non-JSON response (HTTP ${res.status}). Check server logs for details.`);
+    }
+    return res.json();
+  }
+
   async function handleStartCampaign() {
     setIsStarting(true);
     try {
@@ -249,7 +258,7 @@ export default function CampaignDetail() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error ?? "Failed to start campaign");
       toast({
         title: "Campaign started",
@@ -271,7 +280,7 @@ export default function CampaignDetail() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error ?? "Failed to pause");
       toast({ title: "Campaign paused", description: "Sending will stop after the current email." });
       await fetchProgress();
@@ -290,7 +299,7 @@ export default function CampaignDetail() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error ?? "Failed to resume");
       toast({ title: "Campaign resumed", description: "Automated sending has resumed." });
       await fetchProgress();
@@ -309,7 +318,7 @@ export default function CampaignDetail() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       if (!res.ok) throw new Error(data.error ?? "Failed to cancel");
       toast({ title: "Campaign cancelled", description: "The campaign has been cancelled." });
       await Promise.all([fetchProgress(), fetchBatches()]);
