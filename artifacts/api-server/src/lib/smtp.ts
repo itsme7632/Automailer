@@ -1,6 +1,8 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import net from "net";
 import type { Mailbox } from "@workspace/db";
 import { decrypt } from "./crypto";
+import { logger } from "./logger";
 
 export interface SmtpCredentials {
   smtpHost: string;
@@ -10,65 +12,143 @@ export interface SmtpCredentials {
   smtpSecure: string;
 }
 
+// ─── Transporter config ───────────────────────────────────────────────────────
+
 function buildTransportOptions(creds: SmtpCredentials, rawPass?: string) {
-  const pass = rawPass ?? decrypt(creds.smtpPassEncrypted);
+  const pass  = rawPass ?? decrypt(creds.smtpPassEncrypted);
   const isSSL = creds.smtpSecure === "ssl";
   const isTLS = creds.smtpSecure === "tls";
   return {
-    host: creds.smtpHost,
-    port: creds.smtpPort,
-    secure: isSSL,
-    requireTLS: isTLS,
-    auth: { user: creds.smtpUser, pass },
-    tls: { rejectUnauthorized: false },
-    connectionTimeout: 15_000,
-    greetingTimeout: 20_000,
-    socketTimeout: 30_000,
+    host:               creds.smtpHost,
+    port:               creds.smtpPort,
+    secure:             isSSL,        // true = wrap in TLS from the start (port 465)
+    requireTLS:         isTLS,        // true = STARTTLS upgrade required (port 587)
+    auth:               { user: creds.smtpUser, pass },
+    tls:                { rejectUnauthorized: false },
+    connectionTimeout:  20_000,       // ms to establish TCP connection
+    greetingTimeout:    30_000,       // ms to wait for SMTP greeting after connect
+    socketTimeout:      60_000,       // ms of inactivity before the socket is killed
   } as const;
 }
 
+/** Log the full transporter config (password masked) for diagnostics. */
+function logTransportConfig(label: string, creds: SmtpCredentials) {
+  const isSSL = creds.smtpSecure === "ssl";
+  const isTLS = creds.smtpSecure === "tls";
+  logger.info({
+    label,
+    host:              creds.smtpHost,
+    port:              creds.smtpPort,
+    smtpUser:          creds.smtpUser,
+    smtpSecure:        creds.smtpSecure,
+    secure:            isSSL,
+    requireTLS:        isTLS,
+    connectionTimeout: 20_000,
+    greetingTimeout:   30_000,
+    socketTimeout:     60_000,
+    rejectUnauthorized: false,
+  }, "[SMTP] 4. Transporter config (password masked)");
+
+  // GoDaddy / Microsoft 365 detection and recommendation
+  const host = creds.smtpHost.toLowerCase();
+  const isM365 = host.includes("office365") || host.includes("outlook.com");
+  const isGoDaddy = host.includes("godaddy") || host.includes("secureserver") || host.includes("workspace365");
+  if (isGoDaddy && !isM365) {
+    logger.warn({
+      currentHost: creds.smtpHost,
+      recommended: { host: "smtp.office365.com", port: 587, encryption: "tls" },
+    }, "[SMTP] GoDaddy Microsoft 365 mailbox detected — current host may be wrong. Recommended: smtp.office365.com:587 with TLS (STARTTLS)");
+  }
+  if (isM365 && (creds.smtpPort !== 587 || creds.smtpSecure !== "tls")) {
+    logger.warn({
+      currentPort: creds.smtpPort,
+      currentSecure: creds.smtpSecure,
+      recommended: { host: "smtp.office365.com", port: 587, encryption: "tls" },
+    }, "[SMTP] Office 365 host detected but port/encryption may be wrong. Recommended: port 587, encryption TLS (STARTTLS)");
+  }
+}
+
+// ─── TCP preflight check ──────────────────────────────────────────────────────
+
+function tcpConnect(host: string, port: number, timeoutMs = 10_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection({ host, port });
+    const timer  = setTimeout(() => {
+      socket.destroy();
+      reject(new Error(`TCP preflight timed out connecting to ${host}:${port} after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    socket.once("connect", () => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve();
+    });
+    socket.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+// ─── Error mapping ────────────────────────────────────────────────────────────
+
 /**
- * Convert raw nodemailer/network errors into short, actionable messages.
- * The cPanel / Hostinger / Zoho mistake of using "domain.com" instead of
- * "mail.domain.com" as the SMTP host is the #1 cause of greeting timeouts.
+ * Log the raw error with full detail, then return a user-friendly version.
+ * The original code and message are preserved on the returned Error so callers
+ * can still inspect them (err.cause).
  */
-function friendlySmtpError(err: unknown): Error {
-  const msg = err instanceof Error ? err.message : String(err);
-  const code = (err as any)?.code as string | undefined;
+function friendlySmtpError(err: unknown, context: Record<string, unknown> = {}): Error {
+  const rawMsg  = err instanceof Error ? err.message : String(err);
+  const code    = (err as any)?.code  as string | undefined;
+  const command = (err as any)?.command as string | undefined;
+
+  // Always log full raw details before transforming
+  logger.error({
+    ...context,
+    rawMessage:  rawMsg,
+    errorCode:   code,
+    smtpCommand: command,
+    stack:       err instanceof Error ? err.stack : undefined,
+  }, "[SMTP] 7. sendMail() / verify() raw error (full detail)");
+
+  let friendly: Error;
 
   if (
     code === "ETIMEDOUT" ||
-    code === "ESOCKET" ||
-    msg.toLowerCase().includes("greeting") ||
-    msg.toLowerCase().includes("timeout")
+    code === "ESOCKET"   ||
+    rawMsg.toLowerCase().includes("greeting") ||
+    rawMsg.toLowerCase().includes("timeout")
   ) {
-    return new Error(
-      `Connection timeout — the SMTP server did not respond. ` +
-      `For cPanel/Hostinger, the host should be mail.yourdomain.com, not yourdomain.com. ` +
-      `Check the host, port, and encryption settings in Mailbox Settings.`
+    friendly = new Error(
+      `Connection timeout — the SMTP server did not respond within the time limit. ` +
+      `For GoDaddy Microsoft 365 use: host smtp.office365.com, port 587, encryption TLS. ` +
+      `For cPanel/Hostinger use: host mail.yourdomain.com (not yourdomain.com).`
     );
-  }
-
-  if (code === "ECONNREFUSED") {
-    return new Error(
-      `Connection refused on port ${(err as any)?.port ?? "?"}. ` +
-      `SSL uses port 465, STARTTLS uses port 587. Check your port and encryption setting.`
+  } else if (code === "ECONNREFUSED") {
+    friendly = new Error(
+      `Connection refused on port ${(err as any)?.port ?? context.port ?? "?"}. ` +
+      `SSL uses port 465, STARTTLS/TLS uses port 587.`
     );
-  }
-
-  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
-    return new Error(
-      `SMTP host not found — "${(err as any)?.hostname ?? "?"}" does not resolve. ` +
+  } else if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    friendly = new Error(
+      `SMTP host not found — "${(err as any)?.hostname ?? context.host ?? "?"}" does not resolve. ` +
       `Check the hostname in Mailbox Settings.`
     );
+  } else if (rawMsg.toLowerCase().includes("invalid login") || rawMsg.toLowerCase().includes("authentication")) {
+    friendly = new Error(`Authentication failed — check your SMTP username and password.`);
+  } else {
+    friendly = err instanceof Error ? err : new Error(rawMsg);
   }
 
-  if (msg.toLowerCase().includes("invalid login") || msg.toLowerCase().includes("authentication")) {
-    return new Error(`Authentication failed — check your SMTP username and password.`);
-  }
+  // Attach cause so campaign processor can see original code if needed
+  (friendly as any).cause    = err;
+  (friendly as any).rawCode  = code;
+  (friendly as any).rawMsg   = rawMsg;
 
-  return err instanceof Error ? err : new Error(msg);
+  return friendly;
 }
+
+// ─── Public API ───────────────────────────────────────────────────────────────
 
 /** Create a reusable Nodemailer transporter from a stored Mailbox row. */
 export function createSmtpTransport(mailbox: SmtpCredentials): Transporter {
@@ -77,26 +157,54 @@ export function createSmtpTransport(mailbox: SmtpCredentials): Transporter {
 
 /**
  * Verify SMTP credentials without sending a message.
- * `rawPass` is the unencrypted password — used for "Test Connection" before saving.
+ * Used by the "Test Connection" UI. Accepts rawPass so the password
+ * doesn't need to be encrypted before the first save.
  */
 export async function testSmtp(creds: SmtpCredentials & { rawPass?: string }): Promise<void> {
-  const transport = nodemailer.createTransport(
-    buildTransportOptions(creds, creds.rawPass)
-  );
+  const context = { host: creds.smtpHost, port: creds.smtpPort, user: creds.smtpUser };
+  logger.info(context, "[SMTP-TEST] Starting SMTP test connection");
+  logTransportConfig("SMTP-TEST", creds);
+
+  // TCP preflight
+  logger.info(context, "[SMTP-TEST] Running TCP preflight check");
   try {
+    await tcpConnect(creds.smtpHost, creds.smtpPort, 10_000);
+    logger.info(context, "[SMTP-TEST] TCP preflight succeeded — port is reachable");
+  } catch (tcpErr: any) {
+    logger.error({ ...context, tcpError: tcpErr.message }, "[SMTP-TEST] TCP preflight FAILED — port unreachable before even starting SMTP");
+    // Don't abort — let nodemailer give its own error for completeness
+  }
+
+  const transport = nodemailer.createTransport({
+    ...buildTransportOptions(creds, creds.rawPass),
+    debug:  true,
+    logger: {
+      level()     { return true; },
+      trace(msg: string, ...args: any[]) { logger.debug({ smtpTrace: true }, `[SMTP-TEST] TRACE: ${msg} ${args.join(" ")}`); },
+      debug(msg: string, ...args: any[]) { logger.debug({ smtpTrace: true }, `[SMTP-TEST] DEBUG: ${msg} ${args.join(" ")}`); },
+      info(msg: string, ...args: any[])  { logger.info({ smtpTrace: true },  `[SMTP-TEST] INFO:  ${msg} ${args.join(" ")}`); },
+      warn(msg: string, ...args: any[])  { logger.warn({ smtpTrace: true },  `[SMTP-TEST] WARN:  ${msg} ${args.join(" ")}`); },
+      error(msg: string, ...args: any[]) { logger.error({ smtpTrace: true }, `[SMTP-TEST] ERROR: ${msg} ${args.join(" ")}`); },
+      fatal(msg: string, ...args: any[]) { logger.error({ smtpTrace: true }, `[SMTP-TEST] FATAL: ${msg} ${args.join(" ")}`); },
+    },
+  } as any);
+
+  try {
+    logger.info(context, "[SMTP-TEST] Calling transport.verify()");
     await transport.verify();
+    logger.info(context, "[SMTP-TEST] transport.verify() succeeded — SMTP connection OK");
   } catch (err) {
-    throw friendlySmtpError(err);
+    throw friendlySmtpError(err, context);
   } finally {
     transport.close();
   }
 }
 
 export interface SendOptions {
-  to: string;
+  to:      string;
   subject: string;
-  text: string;
-  html: string;
+  text:    string;
+  html:    string;
 }
 
 /**
@@ -105,27 +213,62 @@ export interface SendOptions {
  */
 export async function sendEmail(
   mailbox: Mailbox,
-  opts: SendOptions
+  opts: SendOptions,
 ): Promise<{ messageId: string }> {
+  const context = {
+    host:    mailbox.smtpHost,
+    port:    mailbox.smtpPort,
+    user:    mailbox.smtpUser,
+    to:      opts.to,
+    subject: opts.subject,
+  };
+
+  logger.info(context, "[SMTP] Starting sendEmail()");
+  logTransportConfig("SMTP-SEND", mailbox);
+
+  // TCP preflight — catches "port is closed" before nodemailer starts
+  logger.info(context, "[SMTP] Running TCP preflight check");
+  try {
+    await tcpConnect(mailbox.smtpHost, mailbox.smtpPort, 10_000);
+    logger.info(context, "[SMTP] TCP preflight succeeded — port is reachable");
+  } catch (tcpErr: any) {
+    logger.error({ ...context, tcpError: tcpErr.message }, "[SMTP] TCP preflight FAILED — port unreachable");
+    // Continue — let nodemailer produce its error so callers get a consistent throw path
+  }
+
   const pass = decrypt(mailbox.smtpPassEncrypted);
-  const transport = nodemailer.createTransport(buildTransportOptions(mailbox, pass));
+  const transport = nodemailer.createTransport({
+    ...buildTransportOptions(mailbox, pass),
+    debug:  true,
+    logger: {
+      level()     { return true; },
+      trace(msg: string, ...args: any[]) { logger.debug({ smtpTrace: true }, `[SMTP] TRACE: ${msg} ${args.join(" ")}`); },
+      debug(msg: string, ...args: any[]) { logger.debug({ smtpTrace: true }, `[SMTP] DEBUG: ${msg} ${args.join(" ")}`); },
+      info(msg: string, ...args: any[])  { logger.info({ smtpTrace: true },  `[SMTP] INFO:  ${msg} ${args.join(" ")}`); },
+      warn(msg: string, ...args: any[])  { logger.warn({ smtpTrace: true },  `[SMTP] WARN:  ${msg} ${args.join(" ")}`); },
+      error(msg: string, ...args: any[]) { logger.error({ smtpTrace: true }, `[SMTP] ERROR: ${msg} ${args.join(" ")}`); },
+      fatal(msg: string, ...args: any[]) { logger.error({ smtpTrace: true }, `[SMTP] FATAL: ${msg} ${args.join(" ")}`); },
+    },
+  } as any);
 
   const fromAddress = mailbox.fromName
     ? `"${mailbox.fromName.replace(/"/g, "")}" <${mailbox.smtpUser}>`
     : mailbox.smtpUser;
 
   try {
+    logger.info({ ...context, from: fromAddress }, "[SMTP] 5. Calling sendMail()");
     const info = await transport.sendMail({
-      from: fromAddress,
-      to: opts.to,
+      from:    fromAddress,
+      to:      opts.to,
       subject: opts.subject,
-      text: opts.text,
-      html: opts.html,
+      text:    opts.text,
+      html:    opts.html,
       replyTo: mailbox.replyTo ?? undefined,
     });
+    logger.info({ ...context, messageId: info.messageId }, "[SMTP] 6. sendMail() completed successfully");
     return { messageId: info.messageId ?? "" };
   } catch (err) {
-    throw friendlySmtpError(err);
+    throw friendlySmtpError(err, context);
   } finally {
     transport.close();
   }
