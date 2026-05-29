@@ -275,7 +275,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   contactPhone:    "",
   companyAddress:  "",
   footerText:      "Built for the auto transport industry.",
-  maintenanceMode: "false",
+  maintenanceMode:      "false",
+  maintenanceMessage:   "",
+  maintenanceReturnTime: "",
+  maintenanceStartedAt:  "",
   // Branding
   defaultAccentColor:  "#1d4ed8",
   defaultEmailSlogan:  "Your #1 Auto Transport Partner",
@@ -397,6 +400,21 @@ router.put("/admin/settings", requireAdmin, async (req, res): Promise<void> => {
   const admin   = req.user!;
   const updates = req.body as Record<string, string>;
 
+  // Auto-stamp maintenanceStartedAt the first time maintenance is switched ON
+  if (updates.maintenanceMode === "true") {
+    const [existing] = await db
+      .select({ value: adminSettingsTable.value })
+      .from(adminSettingsTable)
+      .where(eq(adminSettingsTable.key, "maintenanceMode"));
+    if (!existing || existing.value !== "true") {
+      updates.maintenanceStartedAt = new Date().toISOString();
+    }
+  }
+  // Clear the timestamp when turning OFF
+  if (updates.maintenanceMode === "false") {
+    updates.maintenanceStartedAt = "";
+  }
+
   for (const [key, value] of Object.entries(updates)) {
     await db.insert(adminSettingsTable)
       .values({ key, value: String(value), updatedAt: new Date() })
@@ -405,6 +423,10 @@ router.put("/admin/settings", requireAdmin, async (req, res): Promise<void> => {
         set:    { value: String(value), updatedAt: new Date() },
       });
   }
+
+  // Invalidate the in-memory maintenance cache immediately
+  const { invalidateMaintenanceCache } = await import("../lib/maintenance");
+  invalidateMaintenanceCache();
 
   await db.insert(systemLogsTable).values({
     userId:      admin.id,
@@ -423,7 +445,8 @@ router.get("/admin/public-settings", async (_req, res): Promise<void> => {
     "platformName", "footerText", "defaultAccentColor", "defaultEmailSlogan",
     "heroTitle", "heroSubtitle", "heroSlogan", "faqContent",
     "pricingContent", "contactContent", "maintenanceMode",
-    "allowRegistrations",
+    "maintenanceMessage", "maintenanceReturnTime", "maintenanceStartedAt",
+    "supportEmail", "allowRegistrations",
   ];
   const rows   = await db.select().from(adminSettingsTable);
   const stored = Object.fromEntries(rows.map(r => [r.key, r.value]));

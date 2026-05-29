@@ -30,6 +30,7 @@ import NotFound from "@/pages/not-found";
 import SentEmails from "@/pages/SentEmails";
 import Campaigns from "@/pages/Campaigns";
 import CampaignDetail from "@/pages/CampaignDetail";
+import Maintenance from "@/pages/Maintenance";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -43,6 +44,9 @@ const queryClient = new QueryClient({
 function Router() {
   return (
     <Switch>
+      {/* Maintenance page — always accessible */}
+      <Route path="/maintenance" component={Maintenance} />
+
       {/* Public routes */}
       <Route path="/" component={Home} />
       <Route path="/pricing" component={Pricing} />

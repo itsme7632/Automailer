@@ -7,6 +7,7 @@ import { logger } from "./lib/logger";
 import { db, usersTable, plansTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { hashPassword } from "./lib/auth";
+import { maintenanceMiddleware } from "./lib/maintenance";
 
 const app: Express = express();
 
@@ -29,6 +30,7 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+app.use(maintenanceMiddleware);
 app.use("/api", router);
 
 // ---------------------------------------------------------------------------

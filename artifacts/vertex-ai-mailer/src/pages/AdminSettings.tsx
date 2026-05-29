@@ -681,17 +681,42 @@ export function AdminSettings() {
                 settingsKey="maintenanceMode" settings={settings} onChange={set} />
 
               {settings.maintenanceMode === "true" && (
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-red-50 border border-red-200">
-                  <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0" />
-                  <p className="text-sm text-red-800 font-medium">
-                    Maintenance mode is <strong>ON</strong>. All non-admin users are locked out.
-                  </p>
+                <div className="flex items-start gap-3 p-4 rounded-xl bg-red-50 border border-red-200">
+                  <AlertTriangle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="text-sm text-red-800 font-medium">
+                      Maintenance mode is <strong>ON</strong>. All non-admin users are locked out.
+                    </p>
+                    {settings.maintenanceStartedAt && (
+                      <p className="text-xs text-red-600">
+                        Active since {new Date(settings.maintenanceStartedAt).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
+
+              <div className="space-y-4 pt-1">
+                <Field
+                  label="Maintenance Message"
+                  settingsKey="maintenanceMessage"
+                  settings={settings}
+                  onChange={set}
+                  placeholder="We're currently performing system upgrades. Please check back shortly."
+                />
+                <Field
+                  label="Expected Return Time (optional)"
+                  settingsKey="maintenanceReturnTime"
+                  settings={settings}
+                  onChange={set}
+                  placeholder="e.g. 2026-06-01T14:00 or 'Sunday 2pm EST'"
+                />
+              </div>
 
               <SaveBar saving={saving} onSave={() => saveSection([
                 "platformName", "supportEmail", "contactPhone",
                 "companyAddress", "footerText", "maintenanceMode",
+                "maintenanceMessage", "maintenanceReturnTime",
               ])} label="Save General Settings" />
             </div>
           )}

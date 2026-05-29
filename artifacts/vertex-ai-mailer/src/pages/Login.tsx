@@ -13,6 +13,18 @@ import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
+async function getMaintenanceMode(): Promise<boolean> {
+  try {
+    const base = import.meta.env.BASE_URL ?? "/";
+    const res = await fetch(`${base}api/admin/public-settings`);
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data?.maintenanceMode === "true";
+  } catch {
+    return false;
+  }
+}
+
 const loginSchema = z.object({
   email: z.string().email("Please enter a valid email address"),
   password: z.string().min(6, "Password must be at least 6 characters"),
@@ -56,7 +68,12 @@ export default function Login() {
       if (loggedInUser.role === "admin") {
         setLocation("/admin/dashboard");
       } else {
-        setLocation("/dashboard");
+        const inMaintenance = await getMaintenanceMode();
+        if (inMaintenance) {
+          setLocation("/maintenance");
+        } else {
+          setLocation("/dashboard");
+        }
       }
     } catch (err: any) {
       toast({
