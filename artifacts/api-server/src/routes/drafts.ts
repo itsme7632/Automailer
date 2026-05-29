@@ -29,9 +29,11 @@ function userBranding(user: User): BrandingSettings {
 }
 
 function validStyle(s?: string): EmailStyle {
-  return (["clean", "modern", "minimal", "luxury"] as const).includes(s as EmailStyle)
-    ? (s as EmailStyle)
-    : "clean";
+  const ALL_STYLES: EmailStyle[] = [
+    "clean", "modern", "minimal", "luxury",
+    "corporate", "urgent", "dispatch", "friendly", "mobile", "dark",
+  ];
+  return ALL_STYLES.includes(s as EmailStyle) ? (s as EmailStyle) : "clean";
 }
 
 function injectTracking(html: string, trackingId: string, baseUrl: string): string {
