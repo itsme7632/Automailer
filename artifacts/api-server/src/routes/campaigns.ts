@@ -30,6 +30,22 @@ const activeJobs = new Map<string, boolean>();
 
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
 
+function sendEmailWithTimeout(
+  box: typeof mailboxesTable.$inferSelect,
+  opts: Parameters<typeof sendEmail>[1],
+  timeoutMs = 30_000,
+): ReturnType<typeof sendEmail> {
+  return Promise.race([
+    sendEmail(box, opts),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`SMTP send timed out after ${timeoutMs / 1000}s — check SMTP host connectivity`)),
+        timeoutMs,
+      )
+    ),
+  ]);
+}
+
 function isProviderRateLimitError(msg: string): boolean {
   const s = msg.toLowerCase();
   return (
@@ -71,8 +87,27 @@ export async function processCampaignJobQueue(
   template: typeof templatesTable.$inferSelect,
   user: User,
 ) {
-  if (activeJobs.get(jobId)) return;
+  if (activeJobs.get(jobId)) {
+    logger.info({ jobId, campaignId }, "[QUEUE] 1. Processor already running — skipping duplicate start");
+    return;
+  }
   activeJobs.set(jobId, true);
+  logger.info({ jobId, campaignId, mailbox: box.smtpUser }, "[QUEUE] 1. Campaign processor started");
+
+  // Recover items stuck in 'sending' from a previous interrupted run
+  const stuckItems = await db
+    .update(emailQueueTable)
+    .set({ status: "pending" })
+    .where(and(eq(emailQueueTable.jobId, jobId), eq(emailQueueTable.status, "sending")))
+    .returning({ id: emailQueueTable.id, leadId: emailQueueTable.leadId });
+  if (stuckItems.length > 0) {
+    logger.warn({ jobId, campaignId, count: stuckItems.length }, "[QUEUE] Recovered stuck 'sending' items → reset to pending");
+    const stuckLeadIds = stuckItems.map(i => i.leadId).filter((id): id is number => id != null);
+    if (stuckLeadIds.length > 0) {
+      await db.update(leadsTable).set({ status: "queued", updatedAt: new Date() })
+        .where(inArray(leadsTable.id, stuckLeadIds));
+    }
+  }
 
   const branding   = userBranding(user);
   const fromAddress = box.fromName
@@ -84,7 +119,7 @@ export async function processCampaignJobQueue(
 
   try {
     while (activeJobs.get(jobId)) {
-      // ── True rolling-60-min quota check (counts ALL SMTP attempts) ─────
+      // ── True rolling-60-min quota check ───────────────────────────────
       const hourAgo = new Date(Date.now() - 3_600_000);
       const [hourlyRow] = await db
         .select({ count: sql<number>`count(*)::int` })
@@ -98,6 +133,7 @@ export async function processCampaignJobQueue(
       const maxPerHour   = box.maxPerHour ?? 100;
 
       if (sentThisHour >= maxPerHour) {
+        logger.info({ jobId, campaignId, sentThisHour, maxPerHour }, "[QUEUE] Hourly quota reached — cooling down 60s");
         const cooldownUntil = new Date(Date.now() + 3_600_000);
         await db.update(campaignsTable).set({ cooldownUntil, updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
@@ -123,7 +159,12 @@ export async function processCampaignJobQueue(
         .orderBy(emailQueueTable.id)
         .limit(1);
 
-      if (!item) break;
+      if (!item) {
+        logger.info({ jobId, campaignId }, "[QUEUE] No pending/deferred items found — exiting loop");
+        break;
+      }
+
+      logger.info({ jobId, campaignId, queueItemId: item.id, email: item.email }, "[QUEUE] 2. Queue item picked up");
 
       await db.update(emailQueueTable)
         .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs })
@@ -133,12 +174,14 @@ export async function processCampaignJobQueue(
         await db.update(leadsTable)
           .set({ status: "sending", updatedAt: new Date() })
           .where(eq(leadsTable.id, item.leadId));
+        logger.info({ jobId, campaignId, queueItemId: item.id, leadId: item.leadId }, "[QUEUE] 3. Lead status updated to sending");
       }
 
       const delay = (box.delaySeconds ?? 15) * 1000;
+      logger.info({ jobId, campaignId, queueItemId: item.id, delayMs: delay }, "[QUEUE] Sleeping before send");
       await sleep(delay);
 
-      // ── Send email ─────────────────────────────────────────────────────
+      // ── Build email content ────────────────────────────────────────────
       const row = JSON.parse(item.rowDataJson) as Record<string, string>;
       if (row.price) row.price = formatPrice(row.price);
 
@@ -149,7 +192,6 @@ export async function processCampaignJobQueue(
         useSignatureBuilder: item.useSignatureBuilder,
       });
 
-      // Generate trackingId before send so we can inject pixel
       const trackingId  = randomUUID();
       const publicBase  = process.env.REPLIT_DEV_DOMAIN
         ? `https://${process.env.REPLIT_DEV_DOMAIN}`
@@ -159,8 +201,11 @@ export async function processCampaignJobQueue(
         ? bodyHtml.replace(/<\/body>/i, `${pixelTag}</body>`)
         : bodyHtml + pixelTag;
 
+      logger.info({ jobId, campaignId, queueItemId: item.id, to: item.email, subject }, "[QUEUE] 4. SMTP transporter created — 5. Calling sendMail()");
+
       try {
-        const info = await sendEmail(box, { to: item.email, subject, text: bodyText, html: trackedHtml });
+        const info = await sendEmailWithTimeout(box, { to: item.email, subject, text: bodyText, html: trackedHtml });
+        logger.info({ jobId, campaignId, queueItemId: item.id, messageId: info.messageId }, "[QUEUE] 6. sendMail() returned successfully");
 
         if (box.imapHost && box.imapUser && box.imapPassEncrypted) {
           const raw = buildRawMessage({
@@ -171,29 +216,22 @@ export async function processCampaignJobQueue(
         }
 
         await db.insert(draftsTable).values({
-          userId: user.id,
-          campaignId,
-          leadId: item.leadId ?? null,
-          email: item.email,
-          subject,
-          body: bodyText,
-          status: "success",
-          trackingId,
-          gmailDraftId: `smtp:${info.messageId}`,
+          userId: user.id, campaignId, leadId: item.leadId ?? null,
+          email: item.email, subject, body: bodyText, status: "success",
+          trackingId, gmailDraftId: `smtp:${info.messageId}`,
         });
 
         await db.update(emailQueueTable)
           .set({ status: "success", sentAt: new Date(), trackingId })
           .where(eq(emailQueueTable.id, item.id));
+        logger.info({ jobId, campaignId, queueItemId: item.id }, "[QUEUE] 8. Queue item marked success");
 
-        // Update lead status
         if (item.leadId) {
           await db.update(leadsTable)
             .set({ status: "sent", sentAt: new Date(), updatedAt: new Date() })
             .where(eq(leadsTable.id, item.leadId));
         }
 
-        // Update campaign sentCount
         await db.update(campaignsTable).set({
           sentCount: sql`${campaignsTable.sentCount} + 1`,
           status: "sending",
@@ -205,57 +243,70 @@ export async function processCampaignJobQueue(
       } catch (err: any) {
         const errMsg   = String(err?.message ?? "Send failed");
         const attempts = item.attempts + 1;
+        const newDeferred = (item.deferredCount ?? 0) + 1;
+        logger.error({ jobId, campaignId, queueItemId: item.id, to: item.email, errMsg, attempts }, "[QUEUE] 7. sendMail() threw exception");
 
         await db.insert(draftsTable).values({
           userId: user.id, campaignId, leadId: item.leadId ?? null,
           subject, body: bodyText, status: "failed", errorMessage: errMsg,
         });
 
-        const newDeferred = (item.deferredCount ?? 0) + 1;
-
         if (isProviderRateLimitError(errMsg)) {
           const retryAfter = new Date(Date.now() + 60 * 60_000);
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
-          break; // Provider rate-limited — stop batch
+          logger.warn({ jobId, campaignId, queueItemId: item.id }, "[QUEUE] Provider rate limit — deferring and stopping batch");
+          break;
         } else if (attempts >= 3) {
           await db.update(emailQueueTable)
             .set({ status: "failed", attempts, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
-
           if (item.leadId) {
             await db.update(leadsTable)
               .set({ status: "failed", errorMessage: errMsg, updatedAt: new Date() })
               .where(eq(leadsTable.id, item.leadId));
           }
-
           await db.update(campaignsTable).set({
             failedCount: sql`${campaignsTable.failedCount} + 1`,
             updatedAt: new Date(),
           }).where(eq(campaignsTable.id, campaignId));
-
+          logger.warn({ jobId, campaignId, queueItemId: item.id, attempts }, "[QUEUE] 9. Queue item marked failed (max attempts reached)");
           batchFailed++;
         } else {
           const retryAfter = new Date(Date.now() + retryBackoffMs(newDeferred));
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
+          logger.info({ jobId, campaignId, queueItemId: item.id, retryAfter }, "[QUEUE] Queue item deferred for retry");
         }
       }
     }
   } finally {
     activeJobs.delete(jobId);
+    logger.info({ jobId, campaignId }, "[QUEUE] Processor loop exited — evaluating final campaign status");
 
-    // Update batch record
     await db.update(campaignBatchesTable).set({ sentCount: batchSent, failedCount: batchFailed })
       .where(eq(campaignBatchesTable.jobId, jobId));
 
-    // Determine final campaign status using terminal lead counts (sent+drafted+failed === totalLeads)
     const [campFinal] = await db.select({ status: campaignsTable.status, totalLeads: campaignsTable.totalLeads })
       .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
 
     if (campFinal && campFinal.status !== "cancelled") {
+      // Never finalize while any queue items are still pending/sending/deferred
+      const [activeQRow] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(emailQueueTable)
+        .where(and(
+          eq(emailQueueTable.campaignId, campaignId),
+          inArray(emailQueueTable.status, ["pending", "sending", "deferred"]),
+        ));
+      const activeQCount = activeQRow?.count ?? 0;
+
+      if (activeQCount > 0) {
+        logger.info({ jobId, campaignId, activeQCount }, "[QUEUE] Active queue items remain — not pausing/completing campaign");
+        return;
+      }
+
       const total = campFinal.totalLeads ?? 0;
       const [termRow] = await db.select({ count: sql<number>`count(*)::int` })
         .from(leadsTable)
@@ -264,14 +315,19 @@ export async function processCampaignJobQueue(
           inArray(leadsTable.status, ["sent", "drafted", "failed"])
         ));
       const termCount = termRow?.count ?? 0;
+      logger.info({ jobId, campaignId, total, termCount, activeQCount }, "[QUEUE] Final status check");
 
       if (total > 0 && termCount >= total) {
+        logger.info({ jobId, campaignId }, "[QUEUE] All leads terminal — marking campaign completed");
         await db.update(campaignsTable).set({ status: "completed", updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
       } else {
+        logger.info({ jobId, campaignId, total, termCount }, "[QUEUE] 10. Campaign pause logic triggered — not all leads terminal");
         await db.update(campaignsTable).set({ status: "paused", updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
       }
+    } else {
+      logger.info({ jobId, campaignId, status: campFinal?.status }, "[QUEUE] Campaign already in terminal/hold status — not overriding");
     }
   }
 }
@@ -284,8 +340,31 @@ export async function processCampaignFully(
   user: User,
 ) {
   const key = `campaign:${campaignId}`;
-  if (activeJobs.get(key)) return;
+  if (activeJobs.get(key)) {
+    logger.info({ campaignId }, "[CAMPAIGN] 1. Processor already running — skipping duplicate start");
+    return;
+  }
   activeJobs.set(key, true);
+  logger.info({ campaignId, mailbox: box.smtpUser }, "[CAMPAIGN] 1. Campaign processor started");
+
+  // Recover items stuck in 'sending' from a previous interrupted run
+  const stuckItems = await db
+    .update(emailQueueTable)
+    .set({ status: "pending" })
+    .where(and(
+      eq(emailQueueTable.campaignId, campaignId),
+      eq(emailQueueTable.status, "sending"),
+    ))
+    .returning({ id: emailQueueTable.id, leadId: emailQueueTable.leadId });
+  if (stuckItems.length > 0) {
+    logger.warn({ campaignId, count: stuckItems.length }, "[CAMPAIGN] Recovered stuck 'sending' queue items → reset to pending");
+    const stuckLeadIds = stuckItems.map(i => i.leadId).filter((id): id is number => id != null);
+    if (stuckLeadIds.length > 0) {
+      await db.update(leadsTable)
+        .set({ status: "queued", updatedAt: new Date() })
+        .where(inArray(leadsTable.id, stuckLeadIds));
+    }
+  }
 
   const branding    = userBranding(user);
   const fromAddress = box.fromName
@@ -296,9 +375,12 @@ export async function processCampaignFully(
     while (activeJobs.get(key)) {
       const [camp] = await db.select({ status: campaignsTable.status })
         .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
-      if (!camp || camp.status === "paused" || camp.status === "cancelled") break;
+      if (!camp || camp.status === "paused" || camp.status === "cancelled") {
+        logger.info({ campaignId, status: camp?.status }, "[CAMPAIGN] 10. Campaign pause/cancel detected — stopping loop");
+        break;
+      }
 
-      // True rolling-60-min quota check (counts ALL SMTP attempts)
+      // Rolling-60-min quota check
       const hourAgo = new Date(Date.now() - 3_600_000);
       const [hourlyRow] = await db.select({ count: sql<number>`count(*)::int` })
         .from(emailQueueTable)
@@ -311,6 +393,7 @@ export async function processCampaignFully(
       const maxPerHour   = box.maxPerHour ?? 100;
 
       if (sentThisHour >= maxPerHour) {
+        logger.info({ campaignId, sentThisHour, maxPerHour }, "[CAMPAIGN] Hourly quota reached — cooling down 60s");
         const cooldownUntil = new Date(Date.now() + 3_600_000);
         await db.update(campaignsTable).set({
           status: "cooling_down", cooldownUntil, updatedAt: new Date(),
@@ -335,7 +418,7 @@ export async function processCampaignFully(
       }
 
       // Grab next pending OR ready-deferred item for this campaign
-      const nowTs2 = new Date();
+      const nowTs = new Date();
       const [item] = await db.select()
         .from(emailQueueTable)
         .where(and(
@@ -344,32 +427,40 @@ export async function processCampaignFully(
             eq(emailQueueTable.status, "pending"),
             and(
               eq(emailQueueTable.status, "deferred"),
-              or(isNull(emailQueueTable.retryAfter), lte(emailQueueTable.retryAfter, nowTs2))
+              or(isNull(emailQueueTable.retryAfter), lte(emailQueueTable.retryAfter, nowTs))
             )
           )
         ))
         .orderBy(emailQueueTable.id)
         .limit(1);
 
-      if (!item) break;
+      if (!item) {
+        logger.info({ campaignId }, "[CAMPAIGN] No pending/deferred items found — exiting loop");
+        break;
+      }
+
+      logger.info({ campaignId, queueItemId: item.id, email: item.email }, "[CAMPAIGN] 2. Queue item picked up");
 
       await db.update(emailQueueTable)
-        .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs2 })
+        .set({ status: "sending", firstAttemptAt: item.firstAttemptAt ?? nowTs })
         .where(eq(emailQueueTable.id, item.id));
 
       if (item.leadId) {
         await db.update(leadsTable)
           .set({ status: "sending", updatedAt: new Date() })
           .where(eq(leadsTable.id, item.leadId));
+        logger.info({ campaignId, queueItemId: item.id, leadId: item.leadId }, "[CAMPAIGN] 3. Lead status updated to sending");
       }
 
       const delay = (box.delaySeconds ?? 15) * 1000;
+      logger.info({ campaignId, queueItemId: item.id, delayMs: delay }, "[CAMPAIGN] Sleeping before send");
       await sleep(delay);
 
       // Re-check pause / cancel after delay
       const [campAfter] = await db.select({ status: campaignsTable.status })
         .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
       if (!campAfter || campAfter.status === "paused" || campAfter.status === "cancelled") {
+        logger.info({ campaignId, status: campAfter?.status }, "[CAMPAIGN] 10. Pause/cancel detected after delay — requeueing item");
         await db.update(emailQueueTable).set({ status: "pending" }).where(eq(emailQueueTable.id, item.id));
         if (item.leadId) {
           await db.update(leadsTable)
@@ -379,7 +470,7 @@ export async function processCampaignFully(
         break;
       }
 
-      // ── Send email ────────────────────────────────────────────────────────
+      // Build email content
       const row = JSON.parse(item.rowDataJson) as Record<string, string>;
       if (row.price) row.price = formatPrice(row.price);
 
@@ -399,8 +490,11 @@ export async function processCampaignFully(
         ? bodyHtml.replace(/<\/body>/i, `${pixelTag}</body>`)
         : bodyHtml + pixelTag;
 
+      logger.info({ campaignId, queueItemId: item.id, to: item.email, subject }, "[CAMPAIGN] 4. SMTP transporter created — 5. Calling sendMail()");
+
       try {
-        const info = await sendEmail(box, { to: item.email, subject, text: bodyText, html: trackedHtml });
+        const info = await sendEmailWithTimeout(box, { to: item.email, subject, text: bodyText, html: trackedHtml });
+        logger.info({ campaignId, queueItemId: item.id, messageId: info.messageId }, "[CAMPAIGN] 6. sendMail() returned successfully");
 
         if (box.imapHost && box.imapUser && box.imapPassEncrypted) {
           const raw = buildRawMessage({
@@ -419,6 +513,7 @@ export async function processCampaignFully(
         await db.update(emailQueueTable)
           .set({ status: "success", sentAt: new Date(), trackingId })
           .where(eq(emailQueueTable.id, item.id));
+        logger.info({ campaignId, queueItemId: item.id }, "[CAMPAIGN] 8. Queue item marked success");
 
         if (item.leadId) {
           await db.update(leadsTable)
@@ -434,9 +529,10 @@ export async function processCampaignFully(
         }).where(eq(campaignsTable.id, campaignId));
 
       } catch (err: any) {
-        const errMsg     = String(err?.message ?? "Send failed");
-        const attempts   = item.attempts + 1;
+        const errMsg      = String(err?.message ?? "Send failed");
+        const attempts    = item.attempts + 1;
         const newDeferred = (item.deferredCount ?? 0) + 1;
+        logger.error({ campaignId, queueItemId: item.id, to: item.email, errMsg, attempts }, "[CAMPAIGN] 7. sendMail() threw exception");
 
         await db.insert(draftsTable).values({
           userId: user.id, campaignId, leadId: item.leadId ?? null,
@@ -444,17 +540,15 @@ export async function processCampaignFully(
         });
 
         if (isProviderRateLimitError(errMsg)) {
-          // Provider rate-limiting — defer for 1 hour and pause campaign immediately
           const retryAfter = new Date(Date.now() + 60 * 60_000);
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
           await db.update(campaignsTable).set({
-            status: "cooling_down",
-            cooldownUntil: retryAfter,
-            updatedAt: new Date(),
+            status: "cooling_down", cooldownUntil: retryAfter, updatedAt: new Date(),
           }).where(eq(campaignsTable.id, campaignId));
-          break; // Stop all sends — provider quota exceeded
+          logger.warn({ campaignId, queueItemId: item.id }, "[CAMPAIGN] Provider rate limit — deferring and cooling down");
+          break;
         } else if (attempts >= 3) {
           await db.update(emailQueueTable)
             .set({ status: "failed", attempts, lastError: errMsg })
@@ -468,21 +562,38 @@ export async function processCampaignFully(
             failedCount: sql`${campaignsTable.failedCount} + 1`,
             updatedAt: new Date(),
           }).where(eq(campaignsTable.id, campaignId));
+          logger.warn({ campaignId, queueItemId: item.id, attempts }, "[CAMPAIGN] 9. Queue item marked failed (max attempts reached)");
         } else {
           const retryAfter = new Date(Date.now() + retryBackoffMs(newDeferred));
           await db.update(emailQueueTable)
             .set({ status: "deferred", attempts, deferredCount: newDeferred, retryAfter, lastError: errMsg })
             .where(eq(emailQueueTable.id, item.id));
+          logger.info({ campaignId, queueItemId: item.id, retryAfter }, "[CAMPAIGN] Queue item deferred for retry");
         }
       }
     }
   } finally {
     activeJobs.delete(key);
+    logger.info({ campaignId }, "[CAMPAIGN] Processor loop exited — evaluating final campaign status");
 
     const [camp] = await db.select({ status: campaignsTable.status, totalLeads: campaignsTable.totalLeads })
       .from(campaignsTable).where(eq(campaignsTable.id, campaignId));
 
     if (camp && camp.status !== "paused" && camp.status !== "cancelled" && camp.status !== "cooling_down") {
+      // Never finalize while any queue items are still pending/sending/deferred
+      const [activeQRow] = await db.select({ count: sql<number>`count(*)::int` })
+        .from(emailQueueTable)
+        .where(and(
+          eq(emailQueueTable.campaignId, campaignId),
+          inArray(emailQueueTable.status, ["pending", "sending", "deferred"]),
+        ));
+      const activeQCount = activeQRow?.count ?? 0;
+
+      if (activeQCount > 0) {
+        logger.info({ campaignId, activeQCount }, "[CAMPAIGN] Active queue items remain — not pausing/completing campaign");
+        return;
+      }
+
       const total = camp.totalLeads ?? 0;
       const [termRow] = await db.select({ count: sql<number>`count(*)::int` })
         .from(leadsTable)
@@ -491,16 +602,19 @@ export async function processCampaignFully(
           inArray(leadsTable.status, ["sent", "drafted", "failed"])
         ));
       const termCount = termRow?.count ?? 0;
+      logger.info({ campaignId, total, termCount, activeQCount }, "[CAMPAIGN] Final status check");
 
       if (total > 0 && termCount >= total) {
-        // Every lead has reached a terminal state — campaign is truly complete
+        logger.info({ campaignId }, "[CAMPAIGN] All leads terminal — marking campaign completed");
         await db.update(campaignsTable).set({ status: "completed", updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
       } else {
-        // Deferred/pending items remain or not all leads terminal — pause for retry
+        logger.info({ campaignId, total, termCount }, "[CAMPAIGN] 10. Campaign pause logic triggered — not all leads terminal");
         await db.update(campaignsTable).set({ status: "paused", updatedAt: new Date() })
           .where(eq(campaignsTable.id, campaignId));
       }
+    } else {
+      logger.info({ campaignId, status: camp?.status }, "[CAMPAIGN] Campaign already in terminal/hold status — not overriding");
     }
   }
 }
