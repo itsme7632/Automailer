@@ -39,7 +39,9 @@ type TimelineEvent = { type: string; timestamp: string; detail?: string };
 type StatusFilter = "all" | "delivered" | "failed" | "opened" | "unopened";
 
 function formatRelativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+  const ts = iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z";
+  const diff = Date.now() - new Date(ts).getTime();
+  if (diff < 0) return new Date(ts).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   const s = Math.floor(diff / 1000);
   if (s < 60)  return "just now";
   const m = Math.floor(s / 60);
@@ -48,7 +50,7 @@ function formatRelativeTime(iso: string): string {
   if (h < 24)  return `${h}h ago`;
   const d = Math.floor(h / 24);
   if (d < 7)   return `${d}d ago`;
-  return new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
+  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function getAuthHeaders(): Record<string, string> {

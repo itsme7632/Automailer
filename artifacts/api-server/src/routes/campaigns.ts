@@ -152,10 +152,23 @@ export async function processCampaignJobQueue(
       const maxPerHour   = box.maxPerHour ?? 100;
 
       if (sentThisHour >= maxPerHour) {
-        logger.info({ jobId, campaignId, sentThisHour, maxPerHour }, "[QUEUE] Hourly quota reached — cooling down 60s");
-        const cooldownUntil = new Date(Date.now() + 3_600_000);
-        await db.update(campaignsTable).set({ cooldownUntil, updatedAt: new Date() })
+        const now = Date.now();
+        const [campCd] = await db
+          .select({ cooldownUntil: campaignsTable.cooldownUntil })
+          .from(campaignsTable)
           .where(eq(campaignsTable.id, campaignId));
+        const existingCooldown = campCd?.cooldownUntil;
+        if (!existingCooldown || existingCooldown.getTime() <= now) {
+          const cooldownUntil = new Date(now + 3_600_000);
+          await db.update(campaignsTable).set({ cooldownUntil, updatedAt: new Date() })
+            .where(eq(campaignsTable.id, campaignId));
+          logger.info({ jobId, campaignId, sentThisHour, maxPerHour, cooldownUntil, serverTimeUtc: new Date(now).toISOString(), remainingSecs: 3600 },
+            "[QUEUE] Hourly quota reached — new cooldown set for 60 min");
+        } else {
+          const remainingSecs = Math.ceil((existingCooldown.getTime() - now) / 1000);
+          logger.info({ jobId, campaignId, sentThisHour, maxPerHour, cooldownUntil: existingCooldown, serverTimeUtc: new Date(now).toISOString(), remainingSecs },
+            "[QUEUE] Hourly quota still exceeded — cooldown already active, not resetting");
+        }
         await sleep(60_000);
         continue;
       }
@@ -242,8 +255,11 @@ export async function processCampaignJobQueue(
 
       const subject  = replaceVarsText(template.subject, row);
       const bodyText = replaceVarsText(template.body, row);
+      const resolvedStyle = (item.style ?? "clean") as any;
+      logger.info({ jobId, campaignId, queueItemId: item.id, templateId: template.id, templateName: template.name, itemStyle: item.style, resolvedStyle },
+        "[TEMPLATE] processCampaignJobQueue: rendering email");
       const bodyHtml = buildHtmlEmail(template.body, row, branding, {
-        style: (item.style ?? "clean") as any,
+        style: resolvedStyle,
         useSignatureBuilder: item.useSignatureBuilder,
       });
 
@@ -594,8 +610,11 @@ export async function processCampaignFully(
 
       const subject  = replaceVarsText(template.subject, row);
       const bodyText = replaceVarsText(template.body, row);
+      const resolvedStyleFull = (item.style ?? "clean") as any;
+      logger.info({ campaignId, queueItemId: item.id, templateId: template.id, templateName: template.name, itemStyle: item.style, resolvedStyle: resolvedStyleFull },
+        "[TEMPLATE] processCampaignFully: rendering email");
       const bodyHtml = buildHtmlEmail(template.body, row, branding, {
-        style: (item.style ?? "clean") as any,
+        style: resolvedStyleFull,
         useSignatureBuilder: item.useSignatureBuilder,
       });
 
@@ -1080,9 +1099,12 @@ router.post("/campaigns/:id/send-batch", requireAuth, async (req, res): Promise<
     if (!box) { res.status(400).json({ error: "No active SMTP mailbox configured." }); return; }
 
     const jobId = randomUUID();
-    const emailStyle  = (["clean", "modern", "minimal", "luxury"] as const).includes(campaign.emailStyle as any)
+    const ALL_STYLES_SB = ["clean","modern","minimal","luxury","corporate","urgent","dispatch","friendly","mobile","dark"] as const;
+    const emailStyle  = ALL_STYLES_SB.includes(campaign.emailStyle as any)
       ? campaign.emailStyle as any : "clean";
     const useSig = campaign.useSignature ?? freshUser.useSignature ?? false;
+    logger.info({ campaignId, templateId: template.id, templateName: template.name, selectedEmailStyle: campaign.emailStyle, resolvedEmailStyle: emailStyle },
+      "[TEMPLATE] send-batch: templateId and style resolved");
 
     // Mark leads as queued
     const leadIds = nextLeads.map(l => l.id);
@@ -1327,9 +1349,12 @@ router.post("/campaigns/:id/start-campaign", requireAuth, async (req, res): Prom
     }
 
     const jobId      = randomUUID();
-    const emailStyle = (["clean", "modern", "minimal", "luxury"] as const).includes(campaign.emailStyle as any)
+    const ALL_STYLES_SC = ["clean","modern","minimal","luxury","corporate","urgent","dispatch","friendly","mobile","dark"] as const;
+    const emailStyle = ALL_STYLES_SC.includes(campaign.emailStyle as any)
       ? campaign.emailStyle as any : "clean";
     const useSig     = campaign.useSignature ?? freshUser.useSignature ?? false;
+    logger.info({ campaignId, templateId: template.id, templateName: template.name, selectedEmailStyle: campaign.emailStyle, resolvedEmailStyle: emailStyle },
+      "[TEMPLATE] start-campaign: templateId and style resolved");
 
     // Enqueue all new leads
     if (newLeads.length > 0) {
@@ -2007,7 +2032,8 @@ router.get("/campaigns/:id/start-diagnostics", requireAuth, async (req, res): Pr
         price: lead.price ?? "", notes: lead.notes ?? "",
         quote_id: lead.quoteId ?? "",
       };
-      const emailStyle = (["clean", "modern", "minimal", "luxury"] as const).includes(campaign?.emailStyle as any)
+      const ALL_STYLES_DG = ["clean","modern","minimal","luxury","corporate","urgent","dispatch","friendly","mobile","dark"] as const;
+      const emailStyle = ALL_STYLES_DG.includes(campaign?.emailStyle as any)
         ? campaign?.emailStyle as any : "clean";
       sampleInsertPayload = {
         jobId:              "(would be a new UUID on start)",
