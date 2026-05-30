@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCreateCampaign, getGetCampaignsQueryKey } from "@workspace/api-client-react";
+import { useGetCampaigns, useCreateCampaign, getGetCampaignsQueryKey } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -146,17 +146,10 @@ export default function Campaigns() {
   const { toast }    = useToast();
   const createCampaign = useCreateCampaign();
 
-  const params = new URLSearchParams({ page: String(page), limit: "15" });
-  if (statusFilter !== "all") params.set("status", statusFilter);
-
-  const campaignsQuery = useQuery<{ data: EnrichedCampaign[]; total: number }>({
-    queryKey: ["campaigns-list", page, statusFilter],
-    queryFn: async () => {
-      const res = await fetch(`/api/campaigns?${params}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load campaigns");
-      return res.json();
-    },
-    staleTime: 15_000,
+  const campaignsQuery = useGetCampaigns({
+    page,
+    limit: 15,
+    ...(statusFilter !== "all" ? { status: statusFilter as any } : {}),
   });
 
   const summaryQuery = useQuery<CampaignSummary>({
@@ -169,7 +162,7 @@ export default function Campaigns() {
     staleTime: 30_000,
   });
 
-  const campaigns = campaignsQuery.data?.data ?? [];
+  const campaigns = (campaignsQuery.data?.data ?? []) as unknown as EnrichedCampaign[];
   const summary   = summaryQuery.data;
   const total     = campaignsQuery.data?.total ?? 0;
   const totalPages = Math.ceil(total / 15);
@@ -184,9 +177,8 @@ export default function Campaigns() {
   }, [campaigns, search]);
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["campaigns-list"] });
-    queryClient.invalidateQueries({ queryKey: ["campaigns-summary"] });
     queryClient.invalidateQueries({ queryKey: getGetCampaignsQueryKey() });
+    queryClient.invalidateQueries({ queryKey: ["campaigns-summary"] });
   };
 
   const handleCreate = async () => {
@@ -351,6 +343,15 @@ export default function Campaigns() {
                 <Skeleton className="h-1.5 w-full rounded-full ml-12" />
               </div>
             ))}
+          </div>
+        ) : campaignsQuery.isError ? (
+          <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+            <Inbox className="h-12 w-12 mb-3 opacity-30" />
+            <p className="font-medium text-red-500 text-sm">Failed to load campaigns</p>
+            <p className="text-xs mt-1 text-slate-400">{(campaignsQuery.error as any)?.message ?? "Unknown error"}</p>
+            <Button variant="outline" size="sm" onClick={() => campaignsQuery.refetch()} className="mt-4 rounded-xl gap-1.5">
+              Retry
+            </Button>
           </div>
         ) : !filtered.length ? (
           <div className="flex flex-col items-center justify-center py-20 text-slate-400">

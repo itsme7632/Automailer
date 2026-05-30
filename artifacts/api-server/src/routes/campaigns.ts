@@ -5,7 +5,7 @@ import {
   activityTable, usersTable, emailQueueTable, campaignBatchesTable,
   mailboxesTable,
 } from "@workspace/db";
-import { eq, and, count, sql, desc, gte, inArray, or, isNull, lte, isNotNull } from "drizzle-orm";
+import { eq, and, count, sql, desc, gte, inArray, or, isNull, lte, isNotNull, ne } from "drizzle-orm";
 import { emailTrackingEventsTable } from "@workspace/db";
 import { requireAuth } from "../lib/auth";
 import {
@@ -755,9 +755,9 @@ router.get("/campaigns", requireAuth, async (req, res): Promise<void> => {
   const status = (req.query.status as string | undefined)?.trim();
   const search = (req.query.search as string | undefined)?.trim();
 
-  const conditions: ReturnType<typeof eq>[] = [
+  const conditions = [
     eq(campaignsTable.userId, user.id),
-    sql`${campaignsTable.status} != 'archived'` as any,
+    ne(campaignsTable.status, "archived"),
   ];
   if (status && status !== "all") conditions.push(eq(campaignsTable.status, status));
   if (search) conditions.push(sql`lower(${campaignsTable.name}) like ${`%${search.toLowerCase()}%`}` as any);
@@ -910,7 +910,7 @@ router.get("/campaigns/summary", requireAuth, async (req, res): Promise<void> =>
     .from(campaignsTable)
     .where(and(
       eq(campaignsTable.userId, user.id),
-      sql`${campaignsTable.status} != 'archived'` as any,
+      ne(campaignsTable.status, "archived"),
     ))
     .groupBy(campaignsTable.status);
 
