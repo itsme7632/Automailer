@@ -416,8 +416,16 @@ export default function CampaignDetail() {
     );
   }
 
-  const pct      = progress && progress.total > 0
-    ? Math.round(((progress.sent + progress.queued) / progress.total) * 100) : 0;
+  // ── Single source of truth for progress ──────────────────────────────────
+  // Processed = leads that are DONE (sent/drafted + failed). Queued/sending
+  // leads are still in-flight and must NOT count toward completion.
+  // Rule: never show 100% unless processed === total.
+  const processed = (progress?.sent ?? 0) + (progress?.failed ?? 0);
+  const pct       = progress && progress.total > 0
+    ? (processed >= progress.total
+        ? 100
+        : Math.floor((processed / progress.total) * 100))
+    : 0;
   const isSmtp    = (progress?.sendMode ?? campaign.sendMode) === "smtp";
   const isDone    = progress?.status === "completed" || progress?.status === "cancelled" ||
     (progress?.remaining === 0 && (progress?.queued ?? 0) === 0 && !progress?.isJobActive);
@@ -490,8 +498,8 @@ export default function CampaignDetail() {
       {progress && progress.total > 0 && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-4">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-semibold text-slate-600">{pct}% processed</span>
-            <span className="text-xs text-slate-400">{progress.sent + progress.queued} / {progress.total}</span>
+            <span className="text-xs font-semibold text-slate-600">{pct}% complete</span>
+            <span className="text-xs text-slate-400">{processed} / {progress.total} processed</span>
           </div>
           <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
             <motion.div
@@ -1304,6 +1312,50 @@ export default function CampaignDetail() {
 
                   {diagnostics ? (
                     <>
+                      {/* ── Progress Calculation Debug ─────────────────────── */}
+                      <div className="bg-slate-900 rounded-xl px-4 py-3 text-xs font-mono space-y-1">
+                        <p className="text-slate-400 text-[10px] uppercase tracking-widest font-semibold mb-2">Progress Calculation</p>
+                        {(() => {
+                          const diagSent    = (diagnostics.leadCounts?.sent    ?? 0) + (diagnostics.leadCounts?.drafted ?? 0);
+                          const diagFailed  = diagnostics.leadCounts?.failed   ?? 0;
+                          const diagQueued  = diagnostics.leadCounts?.queued   ?? 0;
+                          const diagSending = diagnostics.leadCounts?.sending  ?? 0;
+                          const diagNew     = diagnostics.leadCounts?.new      ?? 0;
+                          const diagTotal   = diagnostics.totalLeads           ?? 0;
+                          const diagDeferred = diagnostics.queueCounts?.deferred ?? 0;
+                          const diagProcessed = diagSent + diagFailed;
+                          const diagPct = diagTotal > 0
+                            ? (diagProcessed >= diagTotal ? 100 : Math.floor((diagProcessed / diagTotal) * 100))
+                            : 0;
+                          return (
+                            <>
+                              <div className="grid grid-cols-2 gap-x-6 gap-y-0.5">
+                                <span className="text-slate-400">Total Leads</span>
+                                <span className="text-white font-bold">{diagTotal}</span>
+                                <span className="text-emerald-400">Sent / Drafted</span>
+                                <span className="text-emerald-300 font-bold">{diagSent}</span>
+                                <span className="text-red-400">Failed</span>
+                                <span className="text-red-300 font-bold">{diagFailed}</span>
+                                <span className="text-blue-400">Queued</span>
+                                <span className="text-blue-300 font-bold">{diagQueued}</span>
+                                <span className="text-blue-400">Sending Now</span>
+                                <span className="text-blue-300 font-bold">{diagSending}</span>
+                                <span className="text-amber-400">Deferred</span>
+                                <span className="text-amber-300 font-bold">{diagDeferred}</span>
+                                <span className="text-slate-400">Not Started</span>
+                                <span className="text-slate-300 font-bold">{diagNew}</span>
+                              </div>
+                              <div className="border-t border-slate-700 mt-2 pt-2 flex items-center justify-between">
+                                <span className="text-slate-400">Calculated Progress</span>
+                                <span className={`font-bold text-sm ${diagPct === 100 ? "text-emerald-400" : "text-white"}`}>
+                                  ({diagSent} + {diagFailed}) / {diagTotal} = <span className="text-yellow-300">{diagPct}%</span>
+                                </span>
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
                         {[
                           { label: "Campaign Status", value: diagnostics.status },
