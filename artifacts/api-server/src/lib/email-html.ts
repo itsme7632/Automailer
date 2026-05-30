@@ -33,6 +33,7 @@ export interface CtaButton {
   color:       string;
   size:        "sm" | "md" | "lg";
   urlVariable: string;
+  directUrl?:  string;
 }
 
 export interface EmailBuildOptions {
@@ -201,7 +202,7 @@ function buildCtaButtonsHtml(
   if (!buttons.length) return "";
 
   const items = buttons.map(btn => {
-    const rawUrl = row[btn.urlVariable] ?? "";
+    const rawUrl = btn.directUrl?.trim() || row[btn.urlVariable] || "";
     if (!rawUrl) return "";
 
     let href = rawUrl;

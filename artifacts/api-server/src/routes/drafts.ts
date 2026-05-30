@@ -181,6 +181,7 @@ router.post("/drafts/preview", requireAuth, async (req, res): Promise<void> => {
     row,
     style,
     useSignatureBuilder,
+    ctaButtons,
   } = req.body as {
     templateId?:          number;
     body?:                string;
@@ -188,6 +189,7 @@ router.post("/drafts/preview", requireAuth, async (req, res): Promise<void> => {
     row?:                 Record<string, string>;
     style?:               string;
     useSignatureBuilder?: boolean;
+    ctaButtons?:          any[];
   };
 
   if (!row || typeof row !== "object") {
@@ -229,6 +231,7 @@ router.post("/drafts/preview", requireAuth, async (req, res): Promise<void> => {
   const html    = buildHtmlEmail(templateBody, row, branding, {
     style:               emailStyle,
     useSignatureBuilder: useSig,
+    ctaButtons:          Array.isArray(ctaButtons) ? ctaButtons : [],
   });
 
   res.json({ html, subject });

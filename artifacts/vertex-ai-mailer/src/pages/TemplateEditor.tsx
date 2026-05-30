@@ -41,20 +41,25 @@ interface CtaButton {
   color:       string;
   size:        "sm" | "md" | "lg";
   urlVariable: string;
+  directUrl?:  string;
 }
 
 // Generic sample data — NO hardcoded company names
 const SAMPLE_ROW: Record<string, string> = {
-  name:       "Alex Johnson",
-  email:      "alex@example.com",
-  vehicle:    "2023 Tesla Model Y",
-  pickup:     "Miami, FL",
-  delivery:   "Seattle, WA",
-  price:      "$1,250",
-  route:      "FL → WA",
-  quote_id:   "QT-10042",
-  agent_name: "Your Name",
-  notes:      "Enclosed transport preferred",
+  name:         "Alex Johnson",
+  email:        "alex@example.com",
+  vehicle:      "2023 Tesla Model Y",
+  pickup:       "Miami, FL",
+  delivery:     "Seattle, WA",
+  price:        "$1,250",
+  route:        "FL → WA",
+  quote_id:     "QT-10042",
+  agent_name:   "Your Name",
+  notes:        "Enclosed transport preferred",
+  booking_link: "https://book.example.com/reserve",
+  quote_link:   "https://quote.example.com/view",
+  website_link: "https://example.com",
+  phone_link:   "tel:+15555555555",
 };
 
 function replaceVariables(text: string, data: Record<string, string>): string {
@@ -102,7 +107,7 @@ export default function TemplateEditor() {
   const previewBody    = useMemo(() => replaceVariables(body, SAMPLE_ROW),    [body]);
 
   // Fetch HTML preview from the server — uses the EXACT same renderer as actual drafts
-  const fetchHtmlPreview = useCallback(async (bodyText: string, subjectText: string) => {
+  const fetchHtmlPreview = useCallback(async (bodyText: string, subjectText: string, buttons: CtaButton[]) => {
     if (!bodyText.trim()) { setPreviewHtml(null); setPreviewSubjectLine(null); return; }
     setIsLoadingPreview(true);
     try {
@@ -111,10 +116,11 @@ export default function TemplateEditor() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          body:    bodyText,
-          subject: subjectText,
-          row:     SAMPLE_ROW,
-          style:   "clean",
+          body:       bodyText,
+          subject:    subjectText,
+          row:        SAMPLE_ROW,
+          style:      "clean",
+          ctaButtons: buttons,
         }),
       });
       if (!res.ok) throw new Error("Preview failed");
@@ -128,17 +134,17 @@ export default function TemplateEditor() {
     }
   }, []);
 
-  // Debounce preview fetching when body/subject changes
+  // Debounce preview fetching when body/subject/buttons change
   useEffect(() => {
     if (previewMode !== "html") return;
-    const timer = setTimeout(() => fetchHtmlPreview(body, subject), 600);
+    const timer = setTimeout(() => fetchHtmlPreview(body, subject, ctaButtons), 600);
     return () => clearTimeout(timer);
-  }, [body, subject, previewMode, fetchHtmlPreview]);
+  }, [body, subject, ctaButtons, previewMode, fetchHtmlPreview]);
 
   // Fetch preview immediately when switching to HTML tab
   const handleSetPreviewMode = (mode: "text" | "html") => {
     setPreviewMode(mode);
-    if (mode === "html") fetchHtmlPreview(body, subject);
+    if (mode === "html") fetchHtmlPreview(body, subject, ctaButtons);
   };
 
   function addCtaButton() {
@@ -274,34 +280,45 @@ export default function TemplateEditor() {
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
-                    <div className="flex items-center gap-2 ml-6">
-                      <select
-                        value={btn.urlVariable}
-                        onChange={e => updateCtaButton(btn.id, { urlVariable: e.target.value })}
-                        className="flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      >
-                        {CTA_URL_VARS.map(v => (
-                          <option key={v.value} value={v.value}>{v.label}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={btn.color}
-                        onChange={e => updateCtaButton(btn.id, { color: e.target.value })}
-                        className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      >
-                        {CTA_COLORS.map(c => (
-                          <option key={c.value} value={c.value}>{c.label}</option>
-                        ))}
-                      </select>
-                      <select
-                        value={btn.size}
-                        onChange={e => updateCtaButton(btn.id, { size: e.target.value as "sm" | "md" | "lg" })}
-                        className="w-20 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                      >
-                        <option value="sm">Small</option>
-                        <option value="md">Medium</option>
-                        <option value="lg">Large</option>
-                      </select>
+                    <div className="ml-6 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={btn.directUrl ?? ""}
+                          onChange={e => updateCtaButton(btn.id, { directUrl: e.target.value || undefined })}
+                          placeholder="Fixed URL: https://your-site.com/book"
+                          className="rounded-xl h-8 text-xs flex-1"
+                        />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-400 whitespace-nowrap">Or use variable:</span>
+                        <select
+                          value={btn.urlVariable}
+                          onChange={e => updateCtaButton(btn.id, { urlVariable: e.target.value })}
+                          className="flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        >
+                          {CTA_URL_VARS.map(v => (
+                            <option key={v.value} value={v.value}>{v.label}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={btn.color}
+                          onChange={e => updateCtaButton(btn.id, { color: e.target.value })}
+                          className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        >
+                          {CTA_COLORS.map(c => (
+                            <option key={c.value} value={c.value}>{c.label}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={btn.size}
+                          onChange={e => updateCtaButton(btn.id, { size: e.target.value as "sm" | "md" | "lg" })}
+                          className="w-20 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        >
+                          <option value="sm">Small</option>
+                          <option value="md">Medium</option>
+                          <option value="lg">Large</option>
+                        </select>
+                      </div>
                     </div>
                     <div className="ml-6">
                       <span
@@ -310,6 +327,11 @@ export default function TemplateEditor() {
                       >
                         {btn.text || "Button"}
                       </span>
+                      {!btn.directUrl && (
+                        <span className="ml-2 text-xs text-slate-400 italic">
+                          → links to campaign&apos;s {CTA_URL_VARS.find(v => v.value === btn.urlVariable)?.label ?? btn.urlVariable}
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}

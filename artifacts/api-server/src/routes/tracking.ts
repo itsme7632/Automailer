@@ -34,8 +34,9 @@ router.get("/track/open/:trackingId", async (req, res): Promise<void> => {
 
     if (draft) {
       // Deduplication: skip if this exact draft got an open from the same IP
-      // within the last 30 seconds (Apple Mail / privacy proxy rapid-fires).
-      const DEDUP_WINDOW_MS = 30_000;
+      // within the last 5 seconds (prevents duplicate HTTP retries / Apple Mail
+      // rapid prefetch burst, while still counting deliberate re-opens).
+      const DEDUP_WINDOW_MS = 5_000;
       const windowStart = new Date(Date.now() - DEDUP_WINDOW_MS);
 
       const conditions: any[] = [
