@@ -749,23 +749,57 @@ export async function processCampaignFully(
 
 // ─── GET /api/campaigns ───────────────────────────────────────────────────────
 router.get("/campaigns", requireAuth, async (req, res): Promise<void> => {
-  const user = req.user!;
-  const page = parseInt(req.query.page as string, 10) || 1;
-  const limit = parseInt(req.query.limit as string, 10) || 20;
-  const status = req.query.status as string | undefined;
+  const user   = req.user!;
+  const page   = parseInt(req.query.page as string, 10) || 1;
+  const limit  = parseInt(req.query.limit as string, 10) || 20;
+  const status = (req.query.status as string | undefined)?.trim();
+  const search = (req.query.search as string | undefined)?.trim();
 
-  const conditions = [eq(campaignsTable.userId, user.id)];
-  if (status) conditions.push(eq(campaignsTable.status, status));
+  const conditions: ReturnType<typeof eq>[] = [
+    eq(campaignsTable.userId, user.id),
+    sql`${campaignsTable.status} != 'archived'` as any,
+  ];
+  if (status && status !== "all") conditions.push(eq(campaignsTable.status, status));
+  if (search) conditions.push(sql`lower(${campaignsTable.name}) like ${`%${search.toLowerCase()}%`}` as any);
 
-  const [totalResult] = await db.select({ count: count() }).from(campaignsTable).where(and(...conditions));
-  const campaigns = await db.select().from(campaignsTable)
+  const [totalResult] = await db.select({ count: count() })
+    .from(campaignsTable).where(and(...conditions));
+
+  const rows = await db
+    .select({
+      id:           campaignsTable.id,
+      userId:       campaignsTable.userId,
+      name:         campaignsTable.name,
+      status:       campaignsTable.status,
+      templateId:   campaignsTable.templateId,
+      templateName: templatesTable.name,
+      totalLeads:   campaignsTable.totalLeads,
+      draftedCount: campaignsTable.draftedCount,
+      failedCount:  campaignsTable.failedCount,
+      fileName:     campaignsTable.fileName,
+      sendMode:     campaignsTable.sendMode,
+      sentCount:    campaignsTable.sentCount,
+      currentJobId: campaignsTable.currentJobId,
+      emailStyle:   campaignsTable.emailStyle,
+      useSignature: campaignsTable.useSignature,
+      cooldownUntil: campaignsTable.cooldownUntil,
+      createdAt:    campaignsTable.createdAt,
+      updatedAt:    campaignsTable.updatedAt,
+    })
+    .from(campaignsTable)
+    .leftJoin(templatesTable, eq(campaignsTable.templateId, templatesTable.id))
     .where(and(...conditions))
     .orderBy(desc(campaignsTable.createdAt))
     .limit(limit)
     .offset((page - 1) * limit);
 
   res.json({
-    data: campaigns.map(c => ({ ...c, createdAt: c.createdAt.toISOString(), updatedAt: c.updatedAt.toISOString() })),
+    data: rows.map(c => ({
+      ...c,
+      cooldownUntil: c.cooldownUntil?.toISOString() ?? null,
+      createdAt:     c.createdAt.toISOString(),
+      updatedAt:     c.updatedAt.toISOString(),
+    })),
     total: totalResult.count, page, limit,
   });
 });
@@ -862,6 +896,45 @@ router.post("/campaigns/from-upload", requireAuth, async (req, res): Promise<voi
   });
 
   res.status(201).json({ campaignId: campaign.id, total: rows.length, valid, duplicates, invalid });
+});
+
+// ─── GET /api/campaigns/summary ──────────────────────────────────────────────
+router.get("/campaigns/summary", requireAuth, async (req, res): Promise<void> => {
+  const user = req.user!;
+
+  const rows = await db
+    .select({
+      status: campaignsTable.status,
+      cnt:    sql<number>`count(*)::int`,
+    })
+    .from(campaignsTable)
+    .where(and(
+      eq(campaignsTable.userId, user.id),
+      sql`${campaignsTable.status} != 'archived'` as any,
+    ))
+    .groupBy(campaignsTable.status);
+
+  const byStatus: Record<string, number> = {};
+  for (const r of rows) byStatus[r.status] = r.cnt;
+
+  const total     = rows.reduce((s, r) => s + r.cnt, 0);
+  const active    = byStatus.sending    ?? 0;
+  const completed = byStatus.completed  ?? 0;
+  const paused    = byStatus.paused     ?? 0;
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const [todayRow] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(emailQueueTable)
+    .where(and(
+      eq(emailQueueTable.userId, user.id),
+      eq(emailQueueTable.status, "success"),
+      gte(emailQueueTable.sentAt, todayStart),
+    ));
+
+  res.json({ total, active, completed, paused, sentToday: todayRow?.total ?? 0 });
 });
 
 // ─── GET /api/campaigns/:id ───────────────────────────────────────────────────
@@ -1455,6 +1528,68 @@ router.post("/campaigns/:id/cancel", requireAuth, async (req, res): Promise<void
   } catch (err: any) {
     logger.error({ err, campaignId, userId: user.id }, `Cancel campaign error: ${err?.message}`);
     res.status(500).json({ success: false, error: err?.message ?? "Failed to cancel campaign" });
+  }
+});
+
+// ─── POST /api/campaigns/:id/duplicate ───────────────────────────────────────
+router.post("/campaigns/:id/duplicate", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  try {
+    const [original] = await db.select().from(campaignsTable)
+      .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)));
+    if (!original) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+    const [newCampaign] = await db.insert(campaignsTable).values({
+      userId:       user.id,
+      name:         `${original.name} (Copy)`,
+      templateId:   original.templateId ?? null,
+      sendMode:     original.sendMode,
+      emailStyle:   original.emailStyle,
+      useSignature: original.useSignature,
+      status:       "pending",
+      totalLeads:   0,
+      draftedCount: 0,
+      failedCount:  0,
+      sentCount:    0,
+    }).returning();
+
+    await db.insert(activityTable).values({
+      userId: user.id, type: "campaign_created",
+      description: `Campaign "${newCampaign.name}" duplicated from "${original.name}"`,
+    });
+
+    res.status(201).json({
+      ...newCampaign,
+      createdAt: newCampaign.createdAt.toISOString(),
+      updatedAt: newCampaign.updatedAt.toISOString(),
+    });
+  } catch (err: any) {
+    logger.error({ err, campaignId }, `Duplicate campaign error: ${err?.message}`);
+    res.status(500).json({ error: err?.message ?? "Failed to duplicate campaign" });
+  }
+});
+
+// ─── POST /api/campaigns/:id/archive ─────────────────────────────────────────
+router.post("/campaigns/:id/archive", requireAuth, async (req, res): Promise<void> => {
+  const user       = req.user!;
+  const campaignId = parseInt(req.params.id, 10);
+  if (!campaignId) { res.status(400).json({ error: "Invalid campaign id" }); return; }
+
+  try {
+    const [campaign] = await db.update(campaignsTable)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(and(eq(campaignsTable.id, campaignId), eq(campaignsTable.userId, user.id)))
+      .returning();
+    if (!campaign) { res.status(404).json({ error: "Campaign not found" }); return; }
+
+    activeJobs.delete(`campaign:${campaignId}`);
+    res.json({ success: true, status: "archived" });
+  } catch (err: any) {
+    logger.error({ err, campaignId }, `Archive campaign error: ${err?.message}`);
+    res.status(500).json({ error: err?.message ?? "Failed to archive campaign" });
   }
 });
 
