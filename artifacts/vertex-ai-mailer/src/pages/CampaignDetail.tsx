@@ -161,6 +161,8 @@ export default function CampaignDetail() {
         total: number; sent: number; failed: number; remaining: number;
         totalOpens: number; uniqueOpens: number;
         deliveryRate: number; failedRate: number; openRate: number;
+        totalClicks: number; uniqueClicks: number; clickRate: number; ctr: number;
+        topClickedLinks: Array<{ url: string; label: string | null; clicks: number }>;
         sendMode: string;
         opensTimeline: Array<{ date: string; opens: number }>;
         mostEngaged: Array<{
@@ -1139,6 +1141,72 @@ export default function CampaignDetail() {
                     <span>{new Date(analytics.opensTimeline[0].date).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
                     <span>{new Date(analytics.opensTimeline[analytics.opensTimeline.length - 1].date).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
                   </div>
+                </div>
+              )}
+
+              {/* Click Metrics */}
+              {analytics.totalClicks > 0 && (
+                <div className="mt-5 border-t border-slate-100 pt-4">
+                  <p className="text-xs font-semibold text-slate-600 mb-3">CTA Button Clicks</p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                    {[
+                      {
+                        label: "Total Clicks",
+                        value: analytics.totalClicks,
+                        sub: `${analytics.uniqueClicks} unique`,
+                        icon: <ExternalLink className="h-4 w-4 text-green-500" />,
+                      },
+                      {
+                        label: "Click Rate",
+                        value: `${analytics.clickRate}%`,
+                        sub: "of delivered emails",
+                        icon: <TrendingUp className="h-4 w-4 text-blue-500" />,
+                      },
+                      {
+                        label: "CTR",
+                        value: `${analytics.ctr}%`,
+                        sub: "of openers clicked",
+                        icon: <TrendingUp className="h-4 w-4 text-violet-500" />,
+                      },
+                      {
+                        label: "Links Clicked",
+                        value: analytics.topClickedLinks?.length ?? 0,
+                        sub: "unique destinations",
+                        icon: <ExternalLink className="h-4 w-4 text-slate-400" />,
+                      },
+                    ].map(s => (
+                      <div key={s.label} className="bg-slate-50 rounded-xl p-3.5">
+                        <div className="mb-1.5">{s.icon}</div>
+                        <div className="text-xl font-bold text-slate-900">{s.value}</div>
+                        <div className="text-xs font-medium text-slate-600 mt-0.5">{s.label}</div>
+                        <div className="text-xs text-slate-400 mt-0.5">{s.sub}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {analytics.topClickedLinks && analytics.topClickedLinks.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-slate-500 mb-2">Top Clicked Links</p>
+                      {analytics.topClickedLinks.map((link, i) => (
+                        <div key={i} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3.5 py-2.5">
+                          <div className="h-6 w-6 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0 text-xs font-bold text-green-700">
+                            {i + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-semibold text-slate-900 truncate">
+                              {link.label ?? link.url}
+                            </p>
+                            {link.label && (
+                              <p className="text-xs text-slate-400 truncate" title={link.url}>{link.url}</p>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <ExternalLink className="h-3 w-3 text-green-500" />
+                            <span className="text-xs font-bold text-slate-800">{link.clicks}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

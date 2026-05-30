@@ -133,6 +133,13 @@ export async function processCampaignJobQueue(
     ? `"${box.fromName.replace(/"/g, "")}" <${box.smtpUser}>`
     : box.smtpUser;
 
+  const [campaignRow] = await db.select({
+    bookingUrl:  campaignsTable.bookingUrl,
+    quoteUrl:    campaignsTable.quoteUrl,
+    websiteUrl:  campaignsTable.websiteUrl,
+    phoneNumber: campaignsTable.phoneNumber,
+  }).from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+
   let batchSent = 0;
   let batchFailed = 0;
 
@@ -252,6 +259,20 @@ export async function processCampaignJobQueue(
       // ── Build email content ────────────────────────────────────────────
       const row = JSON.parse(item.rowDataJson) as Record<string, string>;
       if (row.price) row.price = formatPrice(row.price);
+      if (campaignRow?.bookingUrl)  row.booking_link = campaignRow.bookingUrl;
+      if (campaignRow?.quoteUrl)    row.quote_link   = campaignRow.quoteUrl;
+      if (campaignRow?.websiteUrl)  row.website_link = campaignRow.websiteUrl;
+      if (campaignRow?.phoneNumber) row.phone_link   = campaignRow.phoneNumber;
+
+      const trackingId = randomUUID();
+      const publicBase = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (process.env.PUBLIC_URL ?? "http://localhost:3000");
+
+      const ctaButtons = (() => {
+        try { return template.ctaButtonsJson ? JSON.parse(template.ctaButtonsJson) : []; }
+        catch { return []; }
+      })();
 
       const subject  = replaceVarsText(template.subject, row);
       const bodyText = replaceVarsText(template.body, row);
@@ -261,12 +282,11 @@ export async function processCampaignJobQueue(
       const bodyHtml = buildHtmlEmail(template.body, row, branding, {
         style: resolvedStyle,
         useSignatureBuilder: item.useSignatureBuilder,
+        ctaButtons,
+        trackingId,
+        publicBase,
       });
 
-      const trackingId  = randomUUID();
-      const publicBase  = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : (process.env.PUBLIC_URL ?? "http://localhost:3000");
       const pixelTag    = `<img src="${publicBase}/api/track/open/${trackingId}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0;" />`;
       const trackedHtml = bodyHtml.includes("</body>")
         ? bodyHtml.replace(/<\/body>/i, `${pixelTag}</body>`)
@@ -469,6 +489,13 @@ export async function processCampaignFully(
     ? `"${box.fromName.replace(/"/g, "")}" <${box.smtpUser}>`
     : box.smtpUser;
 
+  const [campaignUrlRow] = await db.select({
+    bookingUrl:  campaignsTable.bookingUrl,
+    quoteUrl:    campaignsTable.quoteUrl,
+    websiteUrl:  campaignsTable.websiteUrl,
+    phoneNumber: campaignsTable.phoneNumber,
+  }).from(campaignsTable).where(eq(campaignsTable.id, campaignId));
+
   try {
     while (activeJobs.get(key)) {
       const [camp] = await db.select({ status: campaignsTable.status })
@@ -607,6 +634,20 @@ export async function processCampaignFully(
       // Build email content
       const row = JSON.parse(item.rowDataJson) as Record<string, string>;
       if (row.price) row.price = formatPrice(row.price);
+      if (campaignUrlRow?.bookingUrl)  row.booking_link = campaignUrlRow.bookingUrl;
+      if (campaignUrlRow?.quoteUrl)    row.quote_link   = campaignUrlRow.quoteUrl;
+      if (campaignUrlRow?.websiteUrl)  row.website_link = campaignUrlRow.websiteUrl;
+      if (campaignUrlRow?.phoneNumber) row.phone_link   = campaignUrlRow.phoneNumber;
+
+      const trackingId = randomUUID();
+      const publicBase = process.env.REPLIT_DEV_DOMAIN
+        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+        : (process.env.PUBLIC_URL ?? "http://localhost:3000");
+
+      const ctaButtonsFull = (() => {
+        try { return template.ctaButtonsJson ? JSON.parse(template.ctaButtonsJson) : []; }
+        catch { return []; }
+      })();
 
       const subject  = replaceVarsText(template.subject, row);
       const bodyText = replaceVarsText(template.body, row);
@@ -616,12 +657,11 @@ export async function processCampaignFully(
       const bodyHtml = buildHtmlEmail(template.body, row, branding, {
         style: resolvedStyleFull,
         useSignatureBuilder: item.useSignatureBuilder,
+        ctaButtons:          ctaButtonsFull,
+        trackingId,
+        publicBase,
       });
 
-      const trackingId  = randomUUID();
-      const publicBase  = process.env.REPLIT_DEV_DOMAIN
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : (process.env.PUBLIC_URL ?? "http://localhost:3000");
       const pixelTag    = `<img src="${publicBase}/api/track/open/${trackingId}" width="1" height="1" alt="" style="display:none!important;width:1px!important;height:1px!important;border:0;" />`;
       const trackedHtml = bodyHtml.includes("</body>")
         ? bodyHtml.replace(/<\/body>/i, `${pixelTag}</body>`)
@@ -845,6 +885,7 @@ router.post("/campaigns/from-upload", requireAuth, async (req, res): Promise<voi
   const user = req.user!;
   const {
     name, templateId, sendMode, emailStyle, useSignature, fileName, rows,
+    bookingUrl, quoteUrl, websiteUrl, phoneNumber,
   } = req.body as {
     name: string;
     templateId?: number;
@@ -853,6 +894,10 @@ router.post("/campaigns/from-upload", requireAuth, async (req, res): Promise<voi
     useSignature?: boolean;
     fileName?: string;
     rows: Record<string, string | null | boolean | undefined>[];
+    bookingUrl?: string;
+    quoteUrl?: string;
+    websiteUrl?: string;
+    phoneNumber?: string;
   };
 
   if (!name?.trim()) { res.status(400).json({ error: "Campaign name is required." }); return; }
@@ -868,6 +913,10 @@ router.post("/campaigns/from-upload", requireAuth, async (req, res): Promise<voi
     useSignature: useSignature ?? false,
     fileName:   fileName ?? null,
     status:     "pending",
+    bookingUrl:  bookingUrl?.trim() || null,
+    quoteUrl:    quoteUrl?.trim()   || null,
+    websiteUrl:  websiteUrl?.trim() || null,
+    phoneNumber: phoneNumber?.trim() || null,
   }).returning();
 
   // Insert leads (deduplicate by email within this campaign)
@@ -1860,6 +1909,11 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
   let totalOpens  = 0;
   let uniqueOpens = 0;
   let opensTimeline: Array<{ date: string; opens: number }> = [];
+  let totalClicks  = 0;
+  let uniqueClicks = 0;
+  let clickRate    = 0;
+  let ctr          = 0;
+  let topClickedLinks: Array<{ url: string; label: string | null; clicks: number }> = [];
   let mostEngaged: Array<{
     email: string | null;
     name:  string | null;
@@ -1969,6 +2023,45 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
             };
           })
           .filter(e => e.email);
+
+        // ── Click stats ─────────────────────────────────────────────────────
+        const [clickStats] = await db
+          .select({
+            total:  sql<number>`count(*)::int`,
+            unique: sql<number>`count(distinct ${emailTrackingEventsTable.draftId})::int`,
+          })
+          .from(emailTrackingEventsTable)
+          .where(and(
+            inArray(emailTrackingEventsTable.draftId, draftIds),
+            eq(emailTrackingEventsTable.eventType, "click"),
+          ));
+
+        totalClicks  = clickStats?.total  ?? 0;
+        uniqueClicks = clickStats?.unique ?? 0;
+        clickRate    = sent  > 0        ? Math.round((uniqueClicks / sent)        * 100) : 0;
+        ctr          = uniqueOpens > 0  ? Math.round((uniqueClicks / uniqueOpens) * 100) : 0;
+
+        const topLinksRows = await db
+          .select({
+            url:    emailTrackingEventsTable.linkUrl,
+            label:  emailTrackingEventsTable.buttonLabel,
+            clicks: sql<number>`count(*)::int`,
+          })
+          .from(emailTrackingEventsTable)
+          .where(and(
+            inArray(emailTrackingEventsTable.draftId, draftIds),
+            eq(emailTrackingEventsTable.eventType, "click"),
+            isNotNull(emailTrackingEventsTable.linkUrl),
+          ))
+          .groupBy(emailTrackingEventsTable.linkUrl, emailTrackingEventsTable.buttonLabel)
+          .orderBy(sql`count(*) desc`)
+          .limit(10);
+
+        topClickedLinks = topLinksRows.map(r => ({
+          url:    r.url    ?? "",
+          label:  r.label  ?? null,
+          clicks: r.clicks,
+        }));
       }
     }
   }
@@ -1981,6 +2074,7 @@ router.get("/campaigns/:id/analytics", requireAuth, async (req, res): Promise<vo
     total, sent, failed, remaining,
     totalOpens, uniqueOpens,
     deliveryRate, failedRate, openRate,
+    totalClicks, uniqueClicks, clickRate, ctr, topClickedLinks,
     opensTimeline, mostEngaged,
     sendMode: campaign.sendMode,
   });

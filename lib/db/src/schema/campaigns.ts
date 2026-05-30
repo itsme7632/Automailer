@@ -20,6 +20,11 @@ export const campaignsTable = pgTable("campaigns", {
   emailStyle: text("email_style").notNull().default("clean"),
   useSignature: boolean("use_signature").notNull().default(false),
   cooldownUntil: timestamp("cooldown_until"),
+  // CTA / campaign link URLs
+  bookingUrl: text("booking_url"),
+  quoteUrl: text("quote_url"),
+  websiteUrl: text("website_url"),
+  phoneNumber: text("phone_number"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

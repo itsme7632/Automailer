@@ -66,7 +66,8 @@ router.post("/templates/:id/duplicate", requireAuth, async (req, res): Promise<v
     .where(and(eq(templatesTable.id, params.data.id), eq(templatesTable.userId, user.id)));
   if (!source) { res.status(404).json({ error: "Template not found" }); return; }
   const [copy] = await db.insert(templatesTable).values({
-    userId: user.id, name: `${source.name} (Copy)`, subject: source.subject, body: source.body, isDefault: false,
+    userId: user.id, name: `${source.name} (Copy)`, subject: source.subject, body: source.body,
+    isDefault: false, ctaButtonsJson: source.ctaButtonsJson ?? null,
   }).returning();
   res.status(201).json({ ...copy, createdAt: copy.createdAt.toISOString(), updatedAt: copy.updatedAt.toISOString() });
 });

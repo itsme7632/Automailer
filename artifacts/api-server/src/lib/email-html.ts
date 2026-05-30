@@ -27,9 +27,20 @@ export interface BrandingSettings {
   logoUrl?:        string | null;
 }
 
+export interface CtaButton {
+  id:          string;
+  text:        string;
+  color:       string;
+  size:        "sm" | "md" | "lg";
+  urlVariable: string;
+}
+
 export interface EmailBuildOptions {
   style?:               EmailStyle;
   useSignatureBuilder?: boolean;
+  ctaButtons?:          CtaButton[];
+  trackingId?:          string;
+  publicBase?:          string;
 }
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
@@ -178,6 +189,45 @@ Best regards,<br>${lines.join("<br>")}
 </table>`;
 }
 
+// ─── CTA Button builder ───────────────────────────────────────────────────────
+
+function buildCtaButtonsHtml(
+  buttons: CtaButton[],
+  row: Record<string, string>,
+  trackingId: string | undefined,
+  publicBase: string | undefined,
+  fontFamily: string,
+): string {
+  if (!buttons.length) return "";
+
+  const items = buttons.map(btn => {
+    const rawUrl = row[btn.urlVariable] ?? "";
+    if (!rawUrl) return "";
+
+    let href = rawUrl;
+    if (trackingId && publicBase) {
+      href = `${publicBase}/api/track/click/${trackingId}?url=${encodeURIComponent(rawUrl)}&label=${encodeURIComponent(btn.text)}`;
+    }
+
+    const color   = safeColor(btn.color) || "#1d4ed8";
+    const padding = btn.size === "sm" ? "10px 22px" : btn.size === "lg" ? "18px 44px" : "14px 32px";
+    const fontSize = btn.size === "sm" ? "13px" : btn.size === "lg" ? "17px" : "15px";
+
+    return `<tr>
+      <td align="center" style="padding:6px 0;">
+        <!--[if mso]><v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" href="${escapeHtml(href)}" style="height:44px;v-text-anchor:middle;width:220px;" arcsize="8%" stroke="f" fillcolor="${color}"><w:anchorlock/><center style="color:#ffffff;font-family:${fontFamily};font-size:${fontSize};font-weight:700;">${escapeHtml(btn.text)}</center></v:roundrect><![endif]-->
+        <a href="${escapeHtml(href)}" target="_blank" style="background-color:${color};border-radius:6px;color:#ffffff;display:inline-block;font-family:${fontFamily};font-size:${fontSize};font-weight:700;line-height:1.4;padding:${padding};text-align:center;text-decoration:none;-webkit-text-size-adjust:none;mso-hide:all;">${escapeHtml(btn.text)}</a>
+      </td>
+    </tr>`;
+  }).filter(Boolean);
+
+  if (!items.length) return "";
+
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top:20px;">
+${items.join("\n")}
+</table>`;
+}
+
 // ─── Master builder ───────────────────────────────────────────────────────────
 
 export function buildHtmlEmail(
@@ -190,23 +240,23 @@ export function buildHtmlEmail(
   const useSig = options.useSignatureBuilder ?? false;
 
   switch (style) {
-    case "luxury":    return luxuryTemplate(body, row, branding, useSig);
-    case "modern":    return modernTemplate(body, row, branding, useSig);
-    case "minimal":   return minimalTemplate(body, row, branding, useSig);
-    case "corporate": return corporateTemplate(body, row, branding, useSig);
-    case "urgent":    return urgentTemplate(body, row, branding, useSig);
-    case "dispatch":  return dispatchTemplate(body, row, branding, useSig);
-    case "friendly":  return friendlyTemplate(body, row, branding, useSig);
-    case "mobile":    return mobileTemplate(body, row, branding, useSig);
-    case "dark":      return darkTemplate(body, row, branding, useSig);
-    default:          return cleanTemplate(body, row, branding, useSig);
+    case "luxury":    return luxuryTemplate(body, row, branding, useSig, options);
+    case "modern":    return modernTemplate(body, row, branding, useSig, options);
+    case "minimal":   return minimalTemplate(body, row, branding, useSig, options);
+    case "corporate": return corporateTemplate(body, row, branding, useSig, options);
+    case "urgent":    return urgentTemplate(body, row, branding, useSig, options);
+    case "dispatch":  return dispatchTemplate(body, row, branding, useSig, options);
+    case "friendly":  return friendlyTemplate(body, row, branding, useSig, options);
+    case "mobile":    return mobileTemplate(body, row, branding, useSig, options);
+    case "dark":      return darkTemplate(body, row, branding, useSig, options);
+    default:          return cleanTemplate(body, row, branding, useSig, options);
   }
 }
 
 // ─── Style: Clean ─────────────────────────────────────────────────────────────
 
 function cleanTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#1d4ed8";
@@ -226,6 +276,7 @@ function cleanTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -236,7 +287,7 @@ function cleanTemplate(
 <!--[if (gte mso 9)|(IE)]><table width="600" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
 <table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:600px;max-width:600px;background-color:#ffffff;border:1px solid #e2e8f0;">
 ${headerRow}
-<tr><td class="em-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<tr><td class="em-body" style="padding:36px 40px 40px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td></tr>
 </table>
 <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
@@ -249,7 +300,7 @@ ${headerRow}
 // Two-band header, rounded card, quote highlight box, CTA button footer
 
 function modernTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#4f46e5";
@@ -283,6 +334,7 @@ function modernTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e0e7ff", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -319,7 +371,7 @@ function modernTemplate(
 <!-- Quote panel -->
 ${quotePanel}
 <!-- Body -->
-<tr><td class="em-mod-body" style="padding:${quotePanel ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<tr><td class="em-mod-body" style="padding:${quotePanel ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td></tr>
 <!-- CTA footer -->
 <tr>
   <td class="em-mod-foot" style="padding:20px 40px 28px;background-color:#f8fafc;border-top:1px solid #e0e7ff;text-align:center;">
@@ -338,7 +390,7 @@ ${quotePanel}
 // ─── Style: Minimal ───────────────────────────────────────────────────────────
 
 function minimalTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#2563eb";
@@ -359,6 +411,7 @@ function minimalTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#f1f5f9", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -369,7 +422,7 @@ function minimalTemplate(
 <!--[if (gte mso 9)|(IE)]><table width="560" align="center" cellspacing="0" cellpadding="0" border="0"><tr><td><![endif]-->
 <table class="em-card" role="presentation" cellspacing="0" cellpadding="0" border="0" align="center" style="width:560px;max-width:560px;border-top:3px solid ${accent};">
 ${companyRow}
-<tr><td class="em-body" style="padding:12px 0 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td></tr>
+<tr><td class="em-body" style="padding:12px 0 40px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td></tr>
 </table>
 <!--[if (gte mso 9)|(IE)]></td></tr></table><![endif]-->
 </td></tr>
@@ -381,7 +434,7 @@ ${companyRow}
 // ─── Style: Luxury ────────────────────────────────────────────────────────────
 
 function luxuryTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const HEADING_FONT = "Arial, Helvetica, sans-serif";
   const BODY_FONT    = "Georgia, 'Times New Roman', serif";
@@ -399,6 +452,7 @@ function luxuryTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), BODY_FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#d97706", HEADING_FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, HEADING_FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -421,7 +475,7 @@ function luxuryTemplate(
 </tr>
 <tr>
   <td class="em-lux-body em-body" bgcolor="#ffffff" style="background-color:#ffffff;padding:44px 48px 40px;border-left:1px solid #1e293b;border-right:1px solid #1e293b;font-family:${BODY_FONT};">
-    ${bodyHtml}${sigHtml}
+    ${bodyHtml}${ctaHtml}${sigHtml}
   </td>
 </tr>
 <tr>
@@ -441,7 +495,7 @@ function luxuryTemplate(
 // Enterprise look with structured quote details table + two-column footer
 
 function corporateTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#0a2558";
@@ -487,6 +541,7 @@ function corporateTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#cbd5e1", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -520,7 +575,7 @@ function corporateTemplate(
 </tr>
 ${quoteBox}
 <tr>
-  <td class="em-corp-body" style="padding:${quoteBox ? "8px" : "36px"} 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-corp-body" style="padding:${quoteBox ? "8px" : "36px"} 40px 40px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td class="em-corp-foot" style="padding:14px 40px;background-color:#f8fafc;border-top:1px solid #e2e8f0;">
@@ -544,7 +599,7 @@ ${quoteBox}
 // Follow-up style with urgency alert panel and availability warning
 
 function urgentTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const company = branding.companyName?.trim() ? escapeHtml(branding.companyName.trim()) : "";
@@ -580,6 +635,7 @@ function urgentTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#fecaca", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -610,7 +666,7 @@ function urgentTemplate(
 </tr>
 ${urgencyPanel}
 <tr>
-  <td class="em-urg-body" style="padding:8px 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-urg-body" style="padding:8px 40px 36px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="padding:16px 40px 20px;background-color:#fff5f5;border-top:1px solid #fecaca;text-align:center;">
@@ -631,7 +687,7 @@ ${urgencyPanel}
 // Logistics dispatch board feel with route visualization panel
 
 function dispatchTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const MONO    = "Courier New, Courier, monospace";
@@ -684,6 +740,7 @@ function dispatchTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#a7f3d0", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -716,7 +773,7 @@ function dispatchTemplate(
 </tr>
 ${routePanel}
 <tr>
-  <td class="em-disp-body" style="padding:${routePanel ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-disp-body" style="padding:${routePanel ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="padding:12px 40px;background-color:#f0fdf4;border-top:1px solid #d1fae5;">
@@ -739,7 +796,7 @@ ${routePanel}
 // Warm, approachable — personalized greeting box + trust badges footer
 
 function friendlyTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#0369a1";
@@ -774,6 +831,7 @@ function friendlyTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#374151");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#bae6fd", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -805,7 +863,7 @@ function friendlyTemplate(
 </tr>
 ${greetingBox}
 <tr>
-  <td class="em-fr-body" style="padding:${greetingBox ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-fr-body" style="padding:${greetingBox ? "4px" : "36px"} 40px 36px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="padding:16px 40px;background-color:#f0f9ff;border-top:1px solid #bae6fd;">
@@ -831,7 +889,7 @@ ${greetingBox}
 // Ultra-readable: large text, prominent price display, touch-friendly CTA
 
 function mobileTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#1e40af";
@@ -861,6 +919,7 @@ function mobileTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#1e293b", "17px");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#e2e8f0", FONT) : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -883,7 +942,7 @@ function mobileTemplate(
 </tr>
 ${priceDisplay}
 <tr>
-  <td class="em-mob-body" style="padding:0 0 32px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-mob-body" style="padding:0 0 32px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="padding:0 0 32px;text-align:center;">
@@ -902,7 +961,7 @@ ${priceDisplay}
 // Email-safe dark design — dark card, light text, modern SaaS feel
 
 function darkTemplate(
-  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean
+  body: string, row: Record<string, string>, branding: BrandingSettings, useSig: boolean, options: EmailBuildOptions = {}
 ): string {
   const FONT    = "Arial, Helvetica, sans-serif";
   const accent  = safeColor(branding.accentColor) || "#3b82f6";
@@ -944,6 +1003,7 @@ function darkTemplate(
 
   const bodyHtml = textToHtmlParagraphs(replaceVarsHtml(body, row), FONT, "#cbd5e1");
   const sigHtml  = useSig ? buildSignatureHtml(row.agent_name ?? "", branding, "#334155", FONT, "#c8d3e0") : "";
+  const ctaHtml  = buildCtaButtonsHtml(options.ctaButtons ?? [], row, options.trackingId, options.publicBase, FONT);
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
@@ -976,7 +1036,7 @@ function darkTemplate(
 </tr>
 ${quoteRef}
 <tr>
-  <td class="em-dark-body" style="background-color:#1e293b;padding:${quoteRef ? "4px" : "36px"} 40px 40px;font-family:${FONT};">${bodyHtml}${sigHtml}</td>
+  <td class="em-dark-body" style="background-color:#1e293b;padding:${quoteRef ? "4px" : "36px"} 40px 40px;font-family:${FONT};">${bodyHtml}${ctaHtml}${sigHtml}</td>
 </tr>
 <tr>
   <td style="background-color:#0f172a;padding:14px 40px;border-top:1px solid #1e293b;">

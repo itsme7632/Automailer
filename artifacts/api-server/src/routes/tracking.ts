@@ -75,7 +75,8 @@ router.get("/track/open/:trackingId", async (req, res): Promise<void> => {
 
 router.get("/track/click/:trackingId", async (req, res): Promise<void> => {
   const { trackingId } = req.params;
-  const url = req.query.url as string | undefined;
+  const url   = req.query.url   as string | undefined;
+  const label = req.query.label as string | undefined;
 
   if (!url) {
     res.status(400).send("Missing url parameter");
@@ -90,11 +91,12 @@ router.get("/track/click/:trackingId", async (req, res): Promise<void> => {
 
     if (draft) {
       await db.insert(emailTrackingEventsTable).values({
-        draftId:   draft.id,
-        eventType: "click",
-        linkUrl:   url,
-        ipAddress: req.ip ?? null,
-        userAgent: req.get("user-agent") ?? null,
+        draftId:     draft.id,
+        eventType:   "click",
+        linkUrl:     url,
+        buttonLabel: label ?? null,
+        ipAddress:   req.ip ?? null,
+        userAgent:   req.get("user-agent") ?? null,
       });
     }
   } catch {

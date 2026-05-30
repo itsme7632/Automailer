@@ -10,7 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Eye, Mail, CheckCircle2, Clock, AlertCircle, ChevronRight,
   User, AtSign, Calendar, Server, BarChart3, Search, Hash, X,
-  RefreshCw, Ban, Edit3, AlertTriangle, Filter,
+  RefreshCw, Ban, Edit3, AlertTriangle, Filter, MousePointerClick,
 } from "lucide-react";
 
 type SentEmail = {
@@ -282,11 +282,13 @@ function EmailPreviewModal({ emailId, open, onClose }: { emailId: number | null;
     sent:      <CheckCircle2 className="h-4 w-4 text-blue-500" />,
     delivered: <CheckCircle2 className="h-4 w-4 text-emerald-500" />,
     opened:    <Eye className="h-4 w-4 text-violet-500" />,
+    clicked:   <MousePointerClick className="h-4 w-4 text-green-500" />,
     failed:    <AlertCircle className="h-4 w-4 text-red-500" />,
   };
   const timelineLabels: Record<string, string> = {
     sent:      "Email sent via SMTP", delivered: "Delivered to inbox",
     opened:    "Recipient opened email", failed: "Delivery failed",
+    clicked:   "Clicked a CTA button",
   };
 
   return (

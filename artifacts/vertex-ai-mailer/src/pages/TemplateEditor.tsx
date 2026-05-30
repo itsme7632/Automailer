@@ -11,13 +11,37 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Save, Loader2, Eye, Code2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Eye, Code2, Plus, Trash2, MousePointerClick } from "lucide-react";
 
 // Lead variables only — branding is applied automatically from Settings
 const CHIPS = [
   "{name}", "{email}", "{vehicle}", "{pickup}", "{delivery}",
   "{price}", "{route}", "{quote_id}", "{agent_name}", "{notes}",
 ];
+
+const CTA_URL_VARS = [
+  { value: "booking_link", label: "Booking URL" },
+  { value: "quote_link",   label: "Quote URL"   },
+  { value: "website_link", label: "Website URL"  },
+  { value: "phone_link",   label: "Phone"        },
+] as const;
+
+const CTA_COLORS = [
+  { value: "#1d4ed8", label: "Blue"   },
+  { value: "#16a34a", label: "Green"  },
+  { value: "#dc2626", label: "Red"    },
+  { value: "#7c3aed", label: "Purple" },
+  { value: "#0f172a", label: "Black"  },
+  { value: "#d97706", label: "Amber"  },
+] as const;
+
+interface CtaButton {
+  id:          string;
+  text:        string;
+  color:       string;
+  size:        "sm" | "md" | "lg";
+  urlVariable: string;
+}
 
 // Generic sample data — NO hardcoded company names
 const SAMPLE_ROW: Record<string, string> = {
@@ -47,9 +71,10 @@ export default function TemplateEditor() {
     query: { enabled: !!templateId, queryKey: getGetTemplateQueryKey(templateId) },
   });
 
-  const [name, setName]       = useState("");
-  const [subject, setSubject] = useState("");
-  const [body, setBody]       = useState("");
+  const [name, setName]             = useState("");
+  const [subject, setSubject]       = useState("");
+  const [body, setBody]             = useState("");
+  const [ctaButtons, setCtaButtons] = useState<CtaButton[]>([]);
   const [previewMode, setPreviewMode] = useState<"text" | "html">("text");
 
   // HTML preview fetched from server — same pipeline as actual Gmail draft
@@ -64,6 +89,10 @@ export default function TemplateEditor() {
       setName(template.name);
       setSubject(template.subject);
       setBody(template.body);
+      try {
+        const parsed = template.ctaButtonsJson ? JSON.parse(template.ctaButtonsJson) : [];
+        setCtaButtons(Array.isArray(parsed) ? parsed : []);
+      } catch { setCtaButtons([]); }
     }
   }, [template, templateId]);
 
@@ -112,9 +141,23 @@ export default function TemplateEditor() {
     if (mode === "html") fetchHtmlPreview(body, subject);
   };
 
+  function addCtaButton() {
+    setCtaButtons(prev => [...prev, {
+      id: crypto.randomUUID(), text: "Book Now", color: "#1d4ed8", size: "md", urlVariable: "booking_link",
+    }]);
+  }
+
+  function updateCtaButton(id: string, patch: Partial<CtaButton>) {
+    setCtaButtons(prev => prev.map(b => b.id === id ? { ...b, ...patch } : b));
+  }
+
+  function removeCtaButton(id: string) {
+    setCtaButtons(prev => prev.filter(b => b.id !== id));
+  }
+
   const handleSave = () => {
     updateTemplate.mutate(
-      { id: templateId, data: { name, subject, body } },
+      { id: templateId, data: { name, subject, body, ctaButtonsJson: ctaButtons.length > 0 ? JSON.stringify(ctaButtons) : null } as any },
       {
         onSuccess: (data) => {
           toast({ title: "Template saved" });
@@ -193,6 +236,85 @@ export default function TemplateEditor() {
               className="min-h-[360px] font-mono text-sm rounded-xl resize-none"
               placeholder={"Hi {name},\n\nI can get your {vehicle} shipped from {pickup} to {delivery} for {price}.\n\nLet me know if you'd like to move forward.\n\nBest regards,\n{agent_name}"}
             />
+          </div>
+
+          {/* ── CTA Button Builder ── */}
+          <div className="border border-slate-200 rounded-2xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <MousePointerClick className="h-4 w-4 text-slate-500" />
+                <span className="text-sm font-semibold text-slate-700">CTA Buttons</span>
+                <span className="text-xs text-slate-400">(appear below email body)</span>
+              </div>
+              <button
+                onClick={addCtaButton}
+                className="flex items-center gap-1 text-xs bg-blue-600 text-white px-2.5 py-1 rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                <Plus className="h-3 w-3" /> Add Button
+              </button>
+            </div>
+            {ctaButtons.length === 0 ? (
+              <div className="px-4 py-5 text-center text-xs text-slate-400">
+                No CTA buttons — click <span className="font-medium text-blue-600">Add Button</span> to create one.
+                <p className="mt-1 text-slate-300">Buttons link to URLs set when creating the campaign.</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {ctaButtons.map((btn, i) => (
+                  <div key={btn.id} className="px-4 py-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 font-mono w-4 text-center">{i + 1}</span>
+                      <Input
+                        value={btn.text}
+                        onChange={e => updateCtaButton(btn.id, { text: e.target.value })}
+                        placeholder="Button label"
+                        className="rounded-xl h-8 text-xs flex-1"
+                      />
+                      <button onClick={() => removeCtaButton(btn.id)} className="p-1.5 text-red-400 hover:text-red-600 rounded-lg hover:bg-red-50">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 ml-6">
+                      <select
+                        value={btn.urlVariable}
+                        onChange={e => updateCtaButton(btn.id, { urlVariable: e.target.value })}
+                        className="flex-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        {CTA_URL_VARS.map(v => (
+                          <option key={v.value} value={v.value}>{v.label}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={btn.color}
+                        onChange={e => updateCtaButton(btn.id, { color: e.target.value })}
+                        className="w-24 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        {CTA_COLORS.map(c => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={btn.size}
+                        onChange={e => updateCtaButton(btn.id, { size: e.target.value as "sm" | "md" | "lg" })}
+                        className="w-20 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      >
+                        <option value="sm">Small</option>
+                        <option value="md">Medium</option>
+                        <option value="lg">Large</option>
+                      </select>
+                    </div>
+                    <div className="ml-6">
+                      <span
+                        className="inline-block px-4 py-1.5 rounded-lg text-white text-xs font-bold"
+                        style={{ backgroundColor: btn.color, fontSize: btn.size === "sm" ? "11px" : btn.size === "lg" ? "15px" : "13px" }}
+                      >
+                        {btn.text || "Button"}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

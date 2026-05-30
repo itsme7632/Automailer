@@ -6,6 +6,7 @@ export const emailTrackingEventsTable = pgTable("email_tracking_events", {
   draftId: integer("draft_id").references(() => draftsTable.id, { onDelete: "cascade" }),
   eventType: text("event_type").notNull(),
   linkUrl: text("link_url"),
+  buttonLabel: text("button_label"),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

@@ -471,6 +471,10 @@ export default function LeadsImport() {
   const [useSignatureBuilder, setUseSignatureBuilder] = useState(false);
   const [sendMode, setSendMode]                       = useState<SendMode>("gmail");
   const [campaignName, setCampaignName]               = useState<string>("");
+  const [bookingUrl, setBookingUrl]                   = useState<string>("");
+  const [quoteUrl, setQuoteUrl]                       = useState<string>("");
+  const [websiteUrl, setWebsiteUrl]                   = useState<string>("");
+  const [phoneNumber, setPhoneNumber]                 = useState<string>("");
   const [isCreating, setIsCreating]                   = useState(false);
   const [mailboxConnected, setMailboxConnected]       = useState(false);
   const [showPreview, setShowPreview]                 = useState(false);
@@ -585,6 +589,10 @@ export default function LeadsImport() {
           useSignature: useSignatureBuilder,
           fileName:    file?.name ?? "",
           rows:        readyRows,
+          bookingUrl:  bookingUrl.trim() || undefined,
+          quoteUrl:    quoteUrl.trim()   || undefined,
+          websiteUrl:  websiteUrl.trim() || undefined,
+          phoneNumber: phoneNumber.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -824,6 +832,29 @@ export default function LeadsImport() {
                       <p className={`text-xs font-semibold leading-tight ${emailStyle === s.value ? "text-blue-800" : "text-slate-800"}`}>{s.label}</p>
                       {emailStyle === s.value && <CheckCircle2 className="absolute top-1.5 right-1.5 h-3 w-3 text-blue-600" />}
                     </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Campaign Links */}
+              <div className="mb-4 p-3 rounded-xl bg-slate-50 border border-slate-100 space-y-2">
+                <p className="text-xs font-semibold text-slate-700">Campaign Links <span className="text-slate-400 font-normal">— used in CTA buttons</span></p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {[
+                    { label: "Booking URL", value: bookingUrl, set: setBookingUrl, placeholder: "https://book.example.com" },
+                    { label: "Quote URL",   value: quoteUrl,   set: setQuoteUrl,   placeholder: "https://quote.example.com" },
+                    { label: "Website URL", value: websiteUrl, set: setWebsiteUrl, placeholder: "https://www.example.com" },
+                    { label: "Phone",       value: phoneNumber, set: setPhoneNumber, placeholder: "+1 (555) 123-4567" },
+                  ].map(f => (
+                    <div key={f.label}>
+                      <label className="text-xs text-slate-500 mb-1 block">{f.label}</label>
+                      <input
+                        type="text" value={f.value}
+                        onChange={e => f.set(e.target.value)}
+                        placeholder={f.placeholder}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-400 placeholder:text-slate-300"
+                      />
+                    </div>
                   ))}
                 </div>
               </div>
